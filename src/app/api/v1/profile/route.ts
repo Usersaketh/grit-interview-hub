@@ -1,0 +1,3 @@
+import { NextResponse } from "next/server"; import { requireUser } from "@/lib/auth/authorize"; import { errorResponse } from "@/lib/errors";
+export const runtime = "nodejs";
+export async function GET() { try { const {db,user}=await requireUser(); const [{data:profile,error},{data:roles}]=await Promise.all([db.from("profiles").select("id,full_name,email,is_active").eq("id",user.id).single(),db.from("user_roles").select("role").eq("user_id",user.id)]); if(error) throw error; return NextResponse.json({data:{...profile,roles:roles?.map((r)=>r.role)??[]}}); } catch(error) { return errorResponse(error); } }

@@ -1,0 +1,37 @@
+openapi: 3.1.0
+info:
+  title: GRIT Interview Hub API
+  version: 0.1.0
+  description: Initial backend foundation. Supabase bearer session required.
+paths:
+  /api/v1/profile:
+    get:
+      responses: { '200': { description: Current profile } }
+  /api/v1/student/interviews/book:
+    post:
+      summary: Atomically book an interview
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BookingRequest' } } }
+      responses: { '201': { description: Booking created }, '409': { description: Booking conflict or ineligible } }
+  /api/v1/student/badges/{badgeId}/eligibility:
+    get:
+      parameters: [{ name: badgeId, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Eligibility decision } }
+  /api/v1/interviewer/availability:
+    get: { responses: { '200': { description: Availability list } } }
+    post: { responses: { '201': { description: Availability created } } }
+  /api/v1/interviewer/interviews/{id}/result:
+    post: { responses: { '201': { description: Evaluation submitted } } }
+components:
+  schemas:
+    BookingRequest:
+      type: object
+      required: [badgeId, interviewerId, startsAt, endsAt, timezone, idempotencyKey]
+      properties:
+        badgeId: { type: string, format: uuid }
+        interviewerId: { type: string, format: uuid }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        timezone: { type: string, example: Asia/Kolkata }
+        idempotencyKey: { type: string, format: uuid }

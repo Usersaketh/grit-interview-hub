@@ -1,0 +1,3 @@
+import { NextResponse } from "next/server"; import { requireRole } from "@/lib/auth/authorize"; import { errorResponse } from "@/lib/errors"; import { bookingSchema } from "@/lib/validation/schemas"; import { bookInterview } from "@/modules/booking/service"; import { log } from "@/lib/logging";
+export const runtime = "nodejs";
+export async function POST(request: Request) { try { const input = bookingSchema.parse(await request.json()); const { db, user } = await requireRole("STUDENT"); const interview = await bookInterview(db, input); log("booking.created", { interviewId: interview.id, actorId: user.id }); return NextResponse.json({ data: interview }, { status: 201 }); } catch (error) { return errorResponse(error); } }

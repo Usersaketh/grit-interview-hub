@@ -1,0 +1,4 @@
+import { NextResponse } from "next/server";
+import { ZodError } from "zod";
+export class AppError extends Error { constructor(public readonly code: string, public readonly status: number, message: string, public readonly details?: unknown) { super(message); } }
+export function errorResponse(error: unknown) { if (error instanceof AppError) return NextResponse.json({ error: { code: error.code, message: error.message, details: error.details } }, { status: error.status }); if (error instanceof ZodError) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Request validation failed", details: error.flatten() } }, { status: 422 }); console.error(JSON.stringify({ level: "error", message: error instanceof Error ? error.message : "unknown_error" })); return NextResponse.json({ error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred" } }, { status: 500 }); }
