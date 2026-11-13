@@ -1,0 +1,3 @@
+import { NextResponse } from "next/server"; import { requireRole } from "@/lib/auth/authorize"; import { errorResponse } from "@/lib/errors"; import { getStudentMalpracticeStatus } from "@/modules/malpractice/service";
+export const runtime = "nodejs";
+export async function GET() { try { const { db, user } = await requireRole("STUDENT"); const { data: student } = await db.from("students").select("id").eq("user_id", user.id).single(); if (!student) throw new Error("STUDENT_PROFILE_REQUIRED"); const records = await getStudentMalpracticeStatus(db); return NextResponse.json({ data: { studentId: student.id, records: records ?? [] } }); } catch (error) { return errorResponse(error); } }
