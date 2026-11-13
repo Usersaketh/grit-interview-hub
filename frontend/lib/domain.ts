@@ -10,6 +10,7 @@ import type {
   InvitationStatus,
   MalpracticeReviewTargetStatus,
   MalpracticeStatus,
+  UserProfile,
 } from "../types/api";
 
 export type StatusTone = "neutral" | "info" | "success" | "warning" | "error";
@@ -342,6 +343,213 @@ export function hasAllowedRole(
   allowedRoles: readonly AppRole[]
 ): boolean {
   return allowedRoles.some((role) => userRoles.includes(role));
+}
+
+export function getRequiredRolesForPath(
+  pathname: string
+): readonly AppRole[] | null {
+  if (pathname === "/student" || pathname.startsWith("/student/")) {
+    return ["STUDENT"];
+  }
+  if (pathname === "/interviewer" || pathname.startsWith("/interviewer/")) {
+    return ["INTERVIEWER"];
+  }
+  if (pathname === "/operations" || pathname.startsWith("/operations/")) {
+    return ["OPERATIONS", "ADMIN"];
+  }
+  return null;
+}
+
+export function getPortalDisplayName(path: string): string {
+  if (path.startsWith("/student")) return "Student Portal";
+  if (path.startsWith("/interviewer")) return "Interviewer Portal";
+  if (path.startsWith("/operations")) return "Operations Portal";
+  return "Home";
+}
+
+export function sanitizeNextPath(
+  nextParam: string | null | undefined
+): string | null {
+  if (!nextParam) return null;
+  const trimmed = nextParam.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return null;
+  const pathname = trimmed.split("?")[0]?.split("#")[0] ?? "/";
+  if (
+    pathname === "/login" ||
+    pathname === "/signup" ||
+    pathname === "/auth/callback"
+  ) {
+    return null;
+  }
+  return trimmed;
+}
+
+export interface PortalRedirectDecision {
+  target: string;
+  reason:
+    | "unauthenticated"
+    | "unauthorized_role"
+    | "authenticated_auth_page";
+  toastTitle?: string;
+  toastDescription?: string;
+}
+
+export function resolvePortalRedirect(params: {
+  pathname: string;
+  search?: string;
+  nextParam?: string | null;
+  profile: Pick<UserProfile, "roles"> | null;
+  loading: boolean;
+}): PortalRedirectDecision | null {
+  const { pathname, search = "", nextParam, profile, loading } = params;
+  if (loading) return null;
+
+  const requiredRoles = getRequiredRolesForPath(pathname);
+  if (requiredRoles) {
+    if (!profile) {
+      const fullPath = `${pathname}${search ? (search.startsWith("?") ? search : `?${search}`) : ""}`;
+      return {
+        target: `/login?next=${encodeURIComponent(fullPath)}`,
+        reason: "unauthenticated",
+      };
+    }
+
+    if (!hasAllowedRole(profile.roles, requiredRoles)) {
+      const fallback = resolveDefaultPortalPath(profile.roles);
+      const portalName = getPortalDisplayName(fallback);
+      return {
+        target: fallback,
+        reason: "unauthorized_role",
+        toastTitle: "Redirected to your portal",
+        toastDescription: `Your account does not have access to ${getPortalDisplayName(pathname)}. Opened ${portalName}.`,
+      };
+    }
+
+    return null;
+  }
+
+  if ((pathname === "/login" || pathname === "/signup") && profile) {
+    const safeNext = sanitizeNextPath(nextParam);
+    if (safeNext) {
+      const nextPathname = safeNext.split("?")[0] ?? safeNext;
+      const nextRequired = getRequiredRolesForPath(nextPathname);
+      if (!nextRequired || hasAllowedRole(profile.roles, nextRequired)) {
+        return {
+          target: safeNext,
+          reason: "authenticated_auth_page",
+        };
+      }
+      const fallback = resolveDefaultPortalPath(profile.roles);
+      return {
+        target: fallback,
+        reason: "unauthorized_role",
+        toastTitle: "Redirected to your portal",
+        toastDescription: `Opened ${getPortalDisplayName(fallback)} based on your account role.`,
+      };
+    }
+
+    return {
+      target: resolveDefaultPortalPath(profile.roles),
+      reason: "authenticated_auth_page",
+    };
+  }
+
+  return null;
+}
+
+export type AuthCallbackParsed =
+  | {
+      kind: "error";
+      errorCode: string | null;
+      message: string;
+      expired: boolean;
+      nextPath: string | null;
+    }
+  | {
+      kind: "code";
+      code: string;
+      nextPath: string | null;
+    }
+  | {
+      kind: "token_hash";
+      tokenHash: string;
+      otpType: string;
+      nextPath: string | null;
+    }
+  | {
+      kind: "session_tokens";
+      accessToken: string;
+      refreshToken: string;
+      nextPath: string | null;
+    }
+  | {
+      kind: "empty";
+      nextPath: string | null;
+    };
+
+export function parseAuthCallbackParams(
+  searchString: string,
+  hashString = ""
+): AuthCallbackParsed {
+  const search = new URLSearchParams(
+    searchString.startsWith("?") ? searchString.slice(1) : searchString
+  );
+  const hash = new URLSearchParams(
+    hashString.startsWith("#") ? hashString.slice(1) : hashString
+  );
+
+  const nextPath = sanitizeNextPath(
+    search.get("next") || hash.get("next")
+  );
+
+  const errorCode =
+    search.get("error_code") ||
+    hash.get("error_code") ||
+    search.get("error") ||
+    hash.get("error");
+  const errorDescription =
+    search.get("error_description") || hash.get("error_description");
+
+  if (errorCode || errorDescription) {
+    const rawMsg = (errorDescription || errorCode || "Verification failed").replace(
+      /\+/g,
+      " "
+    );
+    const lower = `${errorCode ?? ""} ${rawMsg}`.toLowerCase();
+    const expired =
+      lower.includes("expired") || lower.includes("otp_expired");
+    return {
+      kind: "error",
+      errorCode,
+      message: rawMsg,
+      expired,
+      nextPath,
+    };
+  }
+
+  const code = search.get("code");
+  if (code) {
+    return { kind: "code", code, nextPath };
+  }
+
+  const tokenHash = search.get("token_hash") || hash.get("token_hash");
+  const otpType = search.get("type") || hash.get("type");
+  if (tokenHash && otpType) {
+    return { kind: "token_hash", tokenHash, otpType, nextPath };
+  }
+
+  const accessToken = hash.get("access_token");
+  const refreshToken = hash.get("refresh_token");
+  if (accessToken && refreshToken) {
+    return {
+      kind: "session_tokens",
+      accessToken,
+      refreshToken,
+      nextPath,
+    };
+  }
+
+  return { kind: "empty", nextPath };
 }
 
 export function isInterviewUpcoming(interview: InterviewRecord, now = new Date()): boolean {

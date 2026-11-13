@@ -21,6 +21,10 @@ import {
   normalizeInterviewResult,
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
+import {
+  fetchWithUserCache,
+  getCachedData,
+} from "@frontend/services/dataCache";
 import { fetchStudentInterviews } from "@frontend/services/hubApi";
 import type { InterviewRecord } from "@frontend/types/api";
 
@@ -28,27 +32,63 @@ type FilterTab = "all" | "upcoming" | "past";
 
 export function StudentInterviewsView() {
   const { profile } = useAuth();
-  const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const userId = profile?.id ?? null;
+  const isStudent = Boolean(
+    profile && hasAllowedRole(profile.roles, ["STUDENT"])
+  );
+
+  const [interviews, setInterviews] = useState<InterviewRecord[]>(() =>
+    userId
+      ? (getCachedData<InterviewRecord[]>(userId, "student:interviews")?.data ??
+          [])
+      : []
+  );
+  const [loading, setLoading] = useState<boolean>(() =>
+    userId
+      ? !getCachedData<InterviewRecord[]>(userId, "student:interviews")
+      : true
+  );
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<FilterTab>("all");
 
-  const loadInterviews = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["STUDENT"])) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await fetchStudentInterviews();
-      setInterviews(data);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+  const loadInterviews = useCallback(
+    async (force = false) => {
+      if (!userId || !isStudent) return;
+
+      const cached = getCachedData<InterviewRecord[]>(
+        userId,
+        "student:interviews"
+      );
+      if (cached && !force) {
+        setInterviews(cached.data);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const data = await fetchWithUserCache(
+          userId,
+          "student:interviews",
+          fetchStudentInterviews,
+          { force }
+        );
+        setInterviews(data);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isStudent, userId]
+  );
 
   useEffect(() => {
-    void loadInterviews();
+    void loadInterviews(false);
   }, [loadInterviews]);
 
   const filtered = useMemo(() => {
@@ -80,7 +120,7 @@ export function StudentInterviewsView() {
         }
       />
 
-      <div className="mb-5 flex items-center gap-1 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-1 w-fit">
+      <div className="mb-5 flex w-fit items-center gap-1 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-1">
         {(
           [
             { id: "all", label: `All (${interviews.length})` },
@@ -98,7 +138,7 @@ export function StudentInterviewsView() {
             key={item.id}
             type="button"
             onClick={() => setTab(item.id)}
-            className={`whitespace-nowrap rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`whitespace-nowrap rounded px-3 py-1.5 text-xs font-medium tabular-nums transition-colors ${
               tab === item.id
                 ? "bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-xs"
                 : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
@@ -112,7 +152,10 @@ export function StudentInterviewsView() {
       {loading ? (
         <SectionSkeleton rows={5} />
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadInterviews} />
+        <ErrorBanner
+          message={error}
+          onRetry={() => void loadInterviews(true)}
+        />
       ) : filtered.length === 0 ? (
         <EmptyState
           title="No interviews in this view"
@@ -124,7 +167,7 @@ export function StudentInterviewsView() {
           action={
             <Link
               href="/student/interviews/book"
-              className="inline-flex items-center rounded-md bg-[var(--accent-primary)] px-4 py-2 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+              className="inline-flex items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
             >
               Book Interview
             </Link>
@@ -157,7 +200,7 @@ export function StudentInterviewsView() {
                   return (
                     <tr
                       key={interview.id}
-                      className="hover:bg-[var(--bg-elevated)]/60"
+                      className="transition-colors hover:bg-[var(--bg-elevated)]/60"
                     >
                       <td className="px-4 py-3.5">
                         <p className="font-medium text-[var(--text-primary)]">
@@ -205,7 +248,7 @@ export function StudentInterviewsView() {
                       <td className="px-4 py-3.5 text-right">
                         <Link
                           href={`/student/interviews/${interview.id}`}
-                          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-text)] hover:underline"
+                          className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                         >
                           <span>View</span>
                           <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />

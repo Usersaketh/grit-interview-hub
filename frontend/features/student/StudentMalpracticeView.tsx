@@ -17,33 +17,76 @@ import {
   hasAllowedRole,
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
+import {
+  fetchWithUserCache,
+  getCachedData,
+} from "@frontend/services/dataCache";
 import { fetchStudentMalpracticeStatus } from "@frontend/services/hubApi";
 import type { StudentMalpracticeStatusResponse } from "@frontend/types/api";
 
 export function StudentMalpracticeView() {
   const { profile } = useAuth();
-  const [data, setData] = useState<StudentMalpracticeStatusResponse | null>(
-    null
+  const userId = profile?.id ?? null;
+  const isStudent = Boolean(
+    profile && hasAllowedRole(profile.roles, ["STUDENT"])
   );
-  const [loading, setLoading] = useState(true);
+
+  const [data, setData] = useState<StudentMalpracticeStatusResponse | null>(() =>
+    userId
+      ? (getCachedData<StudentMalpracticeStatusResponse>(
+          userId,
+          "student:malpractice"
+        )?.data ?? null)
+      : null
+  );
+  const [loading, setLoading] = useState<boolean>(() =>
+    userId
+      ? !getCachedData<StudentMalpracticeStatusResponse>(
+          userId,
+          "student:malpractice"
+        )
+      : true
+  );
   const [error, setError] = useState<string | null>(null);
 
-  const loadStatus = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["STUDENT"])) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetchStudentMalpracticeStatus();
-      setData(response);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+  const loadStatus = useCallback(
+    async (force = false) => {
+      if (!userId || !isStudent) return;
+
+      const cached = getCachedData<StudentMalpracticeStatusResponse>(
+        userId,
+        "student:malpractice"
+      );
+      if (cached && !force) {
+        setData(cached.data);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const response = await fetchWithUserCache(
+          userId,
+          "student:malpractice",
+          fetchStudentMalpracticeStatus,
+          { force }
+        );
+        setData(response);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isStudent, userId]
+  );
 
   useEffect(() => {
-    void loadStatus();
+    void loadStatus(false);
   }, [loadStatus]);
 
   const badgeAwards =
@@ -65,14 +108,14 @@ export function StudentMalpracticeView() {
           { label: "Student Portal", href: "/student" },
           { label: "Malpractice & Award Status" },
         ]}
-        title="Certification & Integrity Status"
+        title="Certification &amp; Integrity Status"
         description="Sanitized view of your badge award standing and any integrity review cases."
       />
 
       {loading ? (
         <SectionSkeleton rows={4} />
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadStatus} />
+        <ErrorBanner message={error} onRetry={() => void loadStatus(true)} />
       ) : !data || data.records.length === 0 ? (
         <EmptyState
           title="No integrity or award records"

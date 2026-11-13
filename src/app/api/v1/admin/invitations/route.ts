@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@backend/lib/auth/authorize";
 import { errorResponse } from "@backend/lib/errors";
+import { resolveRequestOrigin } from "@backend/lib/origin";
 import { createInvitationSchema } from "@backend/validation/schemas";
 import {
   createInterviewerInvitation,
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
   try {
     const { db } = await requireRole("OPERATIONS", "ADMIN");
     const input = createInvitationSchema.parse(await request.json());
-    const origin = new URL(request.url).origin;
+    const origin = resolveRequestOrigin(request);
     const data = await createInterviewerInvitation(db, input, origin);
     return NextResponse.json({ data }, { status: 201 });
   } catch (error) {

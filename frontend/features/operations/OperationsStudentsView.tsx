@@ -20,6 +20,10 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+} from "@frontend/services/dataCache";
+import {
   fetchScopedInterviews,
   fetchStaffStudentsRoster,
 } from "@frontend/services/hubApi";
@@ -27,37 +31,78 @@ import type { InterviewRecord, StudentRosterItem } from "@frontend/types/api";
 
 type BookingFilter = "ALL" | "ACTIVE_BOOKING" | "EVALUATED" | "UNBOOKED";
 
+interface OpsStudentsCache {
+  students: StudentRosterItem[];
+  interviews: InterviewRecord[];
+}
+
+const CACHE_KEY = "ops:students";
+
 export function OperationsStudentsView() {
   const { profile } = useAuth();
-  const [students, setStudents] = useState<StudentRosterItem[]>([]);
-  const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const userId = profile?.id ?? null;
+  const isStaff = Boolean(
+    profile && hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])
+  );
+
+  const initialCached = userId
+    ? getCachedData<OpsStudentsCache>(userId, CACHE_KEY)?.data ?? null
+    : null;
+
+  const [students, setStudents] = useState<StudentRosterItem[]>(
+    () => initialCached?.students ?? []
+  );
+  const [interviews, setInterviews] = useState<InterviewRecord[]>(
+    () => initialCached?.interviews ?? []
+  );
+  const [loading, setLoading] = useState<boolean>(() => !initialCached);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<BookingFilter>("ALL");
   const [query, setQuery] = useState("");
 
-  const loadRoster = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [rosterData, interviewsData] = await Promise.all([
-        fetchStaffStudentsRoster(),
-        fetchScopedInterviews(),
-      ]);
-      setStudents(rosterData);
-      setInterviews(interviewsData);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+  const loadRoster = useCallback(
+    async (force = false) => {
+      if (!userId || !isStaff) return;
+
+      const cached = getCachedData<OpsStudentsCache>(userId, CACHE_KEY);
+      if (cached && !force) {
+        setStudents(cached.data.students);
+        setInterviews(cached.data.interviews);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const result = await fetchWithUserCache<OpsStudentsCache>(
+          userId,
+          CACHE_KEY,
+          async () => {
+            const [rosterData, interviewsData] = await Promise.all([
+              fetchStaffStudentsRoster(),
+              fetchScopedInterviews(),
+            ]);
+            return { students: rosterData, interviews: interviewsData };
+          },
+          { force }
+        );
+        setStudents(result.students);
+        setInterviews(result.interviews);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isStaff, userId]
+  );
 
   useEffect(() => {
-    void loadRoster();
+    void loadRoster(false);
   }, [loadRoster]);
 
   const interviewsByStudent = useMemo(() => {
@@ -127,7 +172,7 @@ export function OperationsStudentsView() {
               className={`min-h-9 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 filter === tab.id
                   ? "bg-[var(--accent-primary)] text-white"
-                  : "border border-[var(--border-hairline)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                  : "border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
               }`}
             >
               {tab.label}
@@ -146,7 +191,7 @@ export function OperationsStudentsView() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search name, email, campus, ID..."
             aria-label="Search student roster"
-            className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none sm:w-64"
+            className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none sm:w-64"
           />
         </div>
       </div>
@@ -154,7 +199,7 @@ export function OperationsStudentsView() {
       {loading ? (
         <SectionSkeleton rows={6} />
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadRoster} />
+        <ErrorBanner message={error} onRetry={() => void loadRoster(true)} />
       ) : filtered.length === 0 ? (
         <EmptyState
           title="No students match your filters"
@@ -167,7 +212,7 @@ export function OperationsStudentsView() {
               <thead>
                 <tr className="border-b border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-xs font-medium text-[var(--text-secondary)]">
                   <th className="px-4 py-3">Student</th>
-                  <th className="px-4 py-3">External ID & Campus</th>
+                  <th className="px-4 py-3">External ID &amp; Campus</th>
                   <th className="px-4 py-3">Account</th>
                   <th className="px-4 py-3">Interviews</th>
                   <th className="px-4 py-3">Latest Interview</th>
@@ -233,7 +278,7 @@ export function OperationsStudentsView() {
                       <td className="px-4 py-3.5 text-right align-top">
                         <Link
                           href={`/operations/interviews?studentId=${encodeURIComponent(student.id)}`}
-                          className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                          className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                         >
                           View Interviews
                         </Link>

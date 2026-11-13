@@ -21,6 +21,11 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+  invalidateUserCache,
+} from "@frontend/services/dataCache";
+import {
   createAdminInvitation,
   fetchAdminInvitations,
   revokeAdminInvitation,
@@ -39,14 +44,28 @@ const TIMEZONES = [
   "Asia/Singapore",
 ];
 
+const CACHE_KEY = "ops:invitations";
+
 export function OperationsInvitationsView() {
   const { profile } = useAuth();
   const { pushToast } = useToast();
+  const userId = profile?.id ?? null;
+  const isStaff = Boolean(
+    profile && hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])
+  );
 
   const [invitations, setInvitations] = useState<InterviewerInvitationRecord[]>(
-    []
+    () =>
+      userId
+        ? (getCachedData<InterviewerInvitationRecord[]>(userId, CACHE_KEY)
+            ?.data ?? [])
+        : []
   );
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() =>
+    userId
+      ? !getCachedData<InterviewerInvitationRecord[]>(userId, CACHE_KEY)
+      : true
+  );
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"ALL" | InvitationStatus>(
     "ALL"
@@ -70,24 +89,44 @@ export function OperationsInvitationsView() {
     useState<InterviewerInvitationRecord | null>(null);
   const [revoking, setRevoking] = useState(false);
 
-  const loadInvitations = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await fetchAdminInvitations();
-      setInvitations(data);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+  const loadInvitations = useCallback(
+    async (force = false) => {
+      if (!userId || !isStaff) return;
+
+      const cached = getCachedData<InterviewerInvitationRecord[]>(
+        userId,
+        CACHE_KEY
+      );
+      if (cached && !force) {
+        setInvitations(cached.data);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const data = await fetchWithUserCache(
+          userId,
+          CACHE_KEY,
+          fetchAdminInvitations,
+          { force }
+        );
+        setInvitations(data);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isStaff, userId]
+  );
 
   useEffect(() => {
-    void loadInvitations();
+    void loadInvitations(false);
   }, [loadInvitations]);
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
@@ -129,7 +168,8 @@ export function OperationsInvitationsView() {
         title: "Invitation created",
         description: `Issued single-use INTERVIEWER invitation for ${res.invitation.email}.`,
       });
-      await loadInvitations();
+      if (userId) invalidateUserCache(userId, "ops:");
+      await loadInvitations(true);
     } catch (err) {
       setFormError(formatApiErrorMessage(err));
     } finally {
@@ -151,7 +191,8 @@ export function OperationsInvitationsView() {
         description: `Revoked pending invitation for ${revokeTarget.email}.`,
       });
       setRevokeTarget(null);
-      await loadInvitations();
+      if (userId) invalidateUserCache(userId, "ops:");
+      await loadInvitations(true);
     } catch (err) {
       pushToast({
         tone: "error",
@@ -202,8 +243,8 @@ export function OperationsInvitationsView() {
                 Issue Assessor Invitation
               </h2>
             </div>
-            <span className="rounded bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--accent-text)]">
-              Role: INTERVIEWER
+            <span className="font-mono text-[11px] font-medium text-[var(--accent-text)]">
+              Role · INTERVIEWER
             </span>
           </div>
 
@@ -234,7 +275,7 @@ export function OperationsInvitationsView() {
                   setCreateIdemKey(generateUuid());
                 }}
                 placeholder="assessor@institution.edu"
-                className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
             </div>
 
@@ -251,7 +292,7 @@ export function OperationsInvitationsView() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="Dr. Kavya Nair"
-                className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
             </div>
 
@@ -268,7 +309,7 @@ export function OperationsInvitationsView() {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Staff Backend Architect"
-                className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
             </div>
 
@@ -284,7 +325,7 @@ export function OperationsInvitationsView() {
                   id="inv-timezone"
                   value={defaultTimezone}
                   onChange={(e) => setDefaultTimezone(e.target.value)}
-                  className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-2 text-sm text-[var(--text-primary)]"
+                  className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-2.5 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
                 >
                   {TIMEZONES.map((tz) => (
                     <option key={tz} value={tz}>
@@ -304,7 +345,7 @@ export function OperationsInvitationsView() {
                   id="inv-expiry"
                   value={expiresInDays}
                   onChange={(e) => setExpiresInDays(Number(e.target.value))}
-                  className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-2 text-sm text-[var(--text-primary)]"
+                  className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-2.5 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
                 >
                   <option value={1}>24 hours</option>
                   <option value={3}>3 days</option>
@@ -327,16 +368,18 @@ export function OperationsInvitationsView() {
                 value={expertiseInput}
                 onChange={(e) => setExpertiseInput(e.target.value)}
                 placeholder="TypeScript, Distributed Systems, PostgreSQL"
-                className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                className="block w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
             </div>
 
             <button
               type="submit"
               disabled={creating}
-              className="inline-flex min-h-10 w-full items-center justify-center rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] disabled:opacity-55"
+              className="inline-flex min-h-10 w-full items-center justify-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] disabled:opacity-55"
             >
-              {creating ? "Generating Secure Link..." : "Create Interviewer Invitation"}
+              {creating
+                ? "Generating Secure Link..."
+                : "Create Interviewer Invitation"}
             </button>
           </form>
 
@@ -360,11 +403,14 @@ export function OperationsInvitationsView() {
                 <button
                   type="button"
                   onClick={() => void handleCopyInviteUrl()}
-                  className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                  className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
                 >
                   {copiedUrl ? (
                     <>
-                      <Check className="h-3.5 w-3.5 text-[var(--status-success)]" aria-hidden="true" />
+                      <Check
+                        className="h-3.5 w-3.5 text-[var(--status-success)]"
+                        aria-hidden="true"
+                      />
                       <span>Copied</span>
                     </>
                   ) : (
@@ -389,10 +435,10 @@ export function OperationsInvitationsView() {
                     key={tab}
                     type="button"
                     onClick={() => setStatusFilter(tab)}
-                    className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+                    className={`min-h-8 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                       statusFilter === tab
                         ? "bg-[var(--accent-primary)] text-white"
-                        : "border border-[var(--border-hairline)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]"
+                        : "border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
                     }`}
                   >
                     {tab === "ALL" ? "All" : getInvitationStatusMeta(tab).label}
@@ -403,8 +449,8 @@ export function OperationsInvitationsView() {
 
             <button
               type="button"
-              onClick={() => void loadInvitations()}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border-hairline)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+              onClick={() => void loadInvitations(true)}
+              className="inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
             >
               <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Refresh</span>
@@ -414,7 +460,10 @@ export function OperationsInvitationsView() {
           {loading ? (
             <SectionSkeleton rows={5} />
           ) : error ? (
-            <ErrorBanner message={error} onRetry={loadInvitations} />
+            <ErrorBanner
+              message={error}
+              onRetry={() => void loadInvitations(true)}
+            />
           ) : filteredInvitations.length === 0 ? (
             <EmptyState
               title="No invitations found"
@@ -467,13 +516,13 @@ export function OperationsInvitationsView() {
                               <button
                                 type="button"
                                 onClick={() => setRevokeTarget(inv)}
-                                className="inline-flex items-center gap-1 rounded border border-[var(--border-hairline)] px-2.5 py-1 text-xs font-medium text-[var(--status-error)] hover:bg-[var(--status-error-bg)]"
+                                className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-[var(--status-error)]/30 bg-[var(--status-error-bg)] px-2.5 py-1 text-xs font-medium text-[var(--status-error)] transition-opacity hover:opacity-90"
                               >
                                 <ShieldX className="h-3.5 w-3.5" aria-hidden="true" />
                                 <span>Revoke</span>
                               </button>
                             ) : (
-                              <span className="text-xs text-[var(--text-muted)]">
+                              <span className="text-xs tabular-nums text-[var(--text-muted)]">
                                 {inv.accepted_at
                                   ? formatTimestamp(inv.accepted_at)
                                   : inv.revoked_at
@@ -502,6 +551,7 @@ export function OperationsInvitationsView() {
             : ""
         }
         confirmLabel="Revoke Invitation"
+        destructive
         busy={revoking}
         onCancel={() => {
           if (!revoking) setRevokeTarget(null);

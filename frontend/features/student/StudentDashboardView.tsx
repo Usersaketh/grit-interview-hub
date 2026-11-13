@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Award, Calendar, ShieldAlert } from "lucide-react";
 import { AppShell } from "@frontend/components/AppShell";
+import {
+  GritProgressionTrack,
+  type ProgressionStageKey,
+} from "@frontend/components/GritProgressionTrack";
 import { PageHeader } from "@frontend/components/PageHeader";
 import { StatusText } from "@frontend/components/StatusText";
 import {
@@ -25,21 +29,16 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
-  fetchBadgeEligibility,
-  fetchBadgeRequiredSkills,
-  fetchBadgesCatalog,
-  fetchOwnStudentRow,
-  fetchStudentInterviews,
-  fetchStudentMalpracticeStatus,
-  fetchStudentSkillProgress,
-} from "@frontend/services/hubApi";
+  fetchWithUserCache,
+  getCachedData,
+} from "@frontend/services/dataCache";
+import { fetchStudentOverview } from "@frontend/services/hubApi";
 import type {
-  BadgeRequiredSkill,
   BadgeSummary,
   EligibilityDecision,
   InterviewRecord,
   StudentMalpracticeStatusRow,
-  StudentSkillProgress,
+  StudentOverviewResponse,
 } from "@frontend/types/api";
 
 interface BadgeDashboardRow {
@@ -49,94 +48,101 @@ interface BadgeDashboardRow {
   verifiedCount: number;
 }
 
+function buildBadgeRows(overview: StudentOverviewResponse): BadgeDashboardRow[] {
+  const progressMap = new Map(
+    overview.skillProgress.map((p) => [p.skill_id, p])
+  );
+  const now = new Date();
+  return overview.badges
+    .filter((b) => b.is_active)
+    .map((badge) => {
+      const reqs = overview.requiredSkills.filter(
+        (r) => r.badge_id === badge.id
+      );
+      const verifiedCount = reqs.filter((r) => {
+        const p = progressMap.get(r.skill_id);
+        return (
+          Boolean(p?.verified_at) &&
+          new Date(p!.verified_at!) <= now &&
+          p!.achieved_level >= r.required_level
+        );
+      }).length;
+      return {
+        badge,
+        eligibility: overview.eligibilities[badge.id] ?? null,
+        requiredCount: reqs.length,
+        verifiedCount,
+      };
+    });
+}
+
 export function StudentDashboardView() {
   const { profile } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const userId = profile?.id ?? null;
+  const isStudent = Boolean(
+    profile && hasAllowedRole(profile.roles, ["STUDENT"])
+  );
+
+  const [overview, setOverview] = useState<StudentOverviewResponse | null>(() =>
+    userId
+      ? (getCachedData<StudentOverviewResponse>(userId, "student:overview")
+          ?.data ?? null)
+      : null
+  );
+  const [loading, setLoading] = useState<boolean>(() =>
+    userId
+      ? !getCachedData<StudentOverviewResponse>(userId, "student:overview")
+      : true
+  );
   const [error, setError] = useState<string | null>(null);
 
-  const [studentMeta, setStudentMeta] = useState<{
-    id: string;
-    external_student_id: string;
-    campus_ref: string | null;
-  } | null>(null);
-  const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
-  const [malpracticeRows, setMalpracticeRows] = useState<
-    StudentMalpracticeStatusRow[]
-  >([]);
-  const [badgeRows, setBadgeRows] = useState<BadgeDashboardRow[]>([]);
+  const loadData = useCallback(
+    async (force = false) => {
+      if (!userId || !isStudent) return;
 
-  const loadData = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["STUDENT"])) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [
-        studentRow,
-        interviewsData,
-        malpracticeData,
-        badgesData,
-        reqSkillsData,
-      ] = await Promise.all([
-        fetchOwnStudentRow(profile.id).catch(() => null),
-        fetchStudentInterviews(),
-        fetchStudentMalpracticeStatus(),
-        fetchBadgesCatalog().catch(() => [] as BadgeSummary[]),
-        fetchBadgeRequiredSkills().catch(() => [] as BadgeRequiredSkill[]),
-      ]);
-
-      setStudentMeta(studentRow);
-      setInterviews(interviewsData);
-      setMalpracticeRows(malpracticeData.records);
-
-      let progressRows: StudentSkillProgress[] = [];
-      if (studentRow) {
-        progressRows = await fetchStudentSkillProgress(studentRow.id).catch(
-          () => [] as StudentSkillProgress[]
-        );
+      const cached = getCachedData<StudentOverviewResponse>(
+        userId,
+        "student:overview"
+      );
+      if (cached && !force) {
+        setOverview(cached.data);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
       }
 
-      const progressMap = new Map(
-        progressRows.map((p) => [p.skill_id, p])
-      );
-      const now = new Date();
-
-      const activeBadges = badgesData.filter((b) => b.is_active);
-      const eligibilityResults = await Promise.all(
-        activeBadges.map((b) =>
-          fetchBadgeEligibility(b.id).catch(() => null)
-        )
-      );
-
-      const composed: BadgeDashboardRow[] = activeBadges.map((badge, idx) => {
-        const reqs = reqSkillsData.filter((r) => r.badge_id === badge.id);
-        const verifiedCount = reqs.filter((r) => {
-          const p = progressMap.get(r.skill_id);
-          return (
-            Boolean(p?.verified_at) &&
-            new Date(p!.verified_at!) <= now &&
-            p!.achieved_level >= r.required_level
-          );
-        }).length;
-
-        return {
-          badge,
-          eligibility: eligibilityResults[idx],
-          requiredCount: reqs.length,
-          verifiedCount,
-        };
-      });
-
-      setBadgeRows(composed);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+      setError(null);
+      try {
+        const data = await fetchWithUserCache(
+          userId,
+          "student:overview",
+          fetchStudentOverview,
+          { force }
+        );
+        setOverview(data);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isStudent, userId]
+  );
 
   useEffect(() => {
-    void loadData();
+    void loadData(false);
   }, [loadData]);
+
+  const interviews: InterviewRecord[] = overview?.interviews ?? [];
+  const malpracticeRows: StudentMalpracticeStatusRow[] =
+    overview?.malpracticeStatus.records ?? [];
+  const badgeRows = useMemo(
+    () => (overview ? buildBadgeRows(overview) : []),
+    [overview]
+  );
 
   const upcomingInterview = useMemo(
     () => interviews.find((item) => isInterviewUpcoming(item)) ?? null,
@@ -154,8 +160,12 @@ export function StudentDashboardView() {
   const awardRows = useMemo(
     () =>
       malpracticeRows.filter(
-        (r): r is Extract<StudentMalpracticeStatusRow, { recordType: "badge_award" }> =>
-          r.recordType === "badge_award"
+        (
+          r
+        ): r is Extract<
+          StudentMalpracticeStatusRow,
+          { recordType: "badge_award" }
+        > => r.recordType === "badge_award"
       ),
     [malpracticeRows]
   );
@@ -182,9 +192,12 @@ export function StudentDashboardView() {
       const hasActiveBooking = interviews.some(
         (i) =>
           i.badge_id === row.badge.id &&
-          ["BOOKED", "RESCHEDULE_PENDING", "IN_PROGRESS", "AWAITING_OUTCOME"].includes(
-            i.status
-          )
+          [
+            "BOOKED",
+            "RESCHEDULE_PENDING",
+            "IN_PROGRESS",
+            "AWAITING_OUTCOME",
+          ].includes(i.status)
       );
       const hasAward = awardRows.some(
         (a) =>
@@ -203,6 +216,30 @@ export function StudentDashboardView() {
   const awardedBadgeCount = awardRows.filter(
     (a) => a.awardStatus === "AWARDED" || a.awardStatus === "REINSTATED"
   ).length;
+  const pendingCertCount = awardRows.filter(
+    (a) => a.awardStatus === "CERTIFICATION_PENDING"
+  ).length;
+
+  const activeProgressionStage: ProgressionStageKey = useMemo(() => {
+    if (awardedBadgeCount > 0 || pendingCertCount > 0) return "certification";
+    if (
+      interviews.some(
+        (i) => i.status === "AWAITING_OUTCOME" || i.status === "EVALUATED"
+      )
+    ) {
+      return "evaluation";
+    }
+    if (upcomingInterview || eligibleBadgeCount > 0) return "interview";
+    return "preparation";
+  }, [
+    awardedBadgeCount,
+    eligibleBadgeCount,
+    interviews,
+    pendingCertCount,
+    upcomingInterview,
+  ]);
+
+  const studentMeta = overview?.student ?? null;
 
   return (
     <AppShell allowedRoles={["STUDENT"]} sectionLabel="Student Portal">
@@ -217,7 +254,7 @@ export function StudentDashboardView() {
         actions={
           <Link
             href="/student/interviews/book"
-            className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
+            className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
           >
             <span>Book Interview</span>
             <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -231,9 +268,16 @@ export function StudentDashboardView() {
           <SectionSkeleton rows={4} />
         </div>
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadData} />
+        <ErrorBanner message={error} onRetry={() => void loadData(true)} />
       ) : (
         <div className="space-y-6">
+          {/* GRIT Progression Rail */}
+          <GritProgressionTrack
+            title="Your GRIT Assessment Journey"
+            activeStage={activeProgressionStage}
+            compact
+          />
+
           {/* Next Action Banner */}
           <section
             aria-label="Next recommended action"
@@ -241,7 +285,7 @@ export function StudentDashboardView() {
           >
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-xs font-medium text-[var(--accent-text)]">
+                <p className="font-mono text-[11px] font-medium uppercase tracking-wider text-[var(--accent-text)]">
                   Recommended Next Step
                 </p>
                 {upcomingInterview ? (
@@ -252,14 +296,14 @@ export function StudentDashboardView() {
                     </h2>
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">
                       Scheduled for{" "}
-                      <span className="tabular-nums font-medium text-[var(--text-primary)]">
+                      <span className="font-medium tabular-nums text-[var(--text-primary)]">
                         {formatTimestamp(
                           upcomingInterview.starts_at,
                           upcomingInterview.timezone
                         )}
                       </span>{" "}
                       ({upcomingInterview.timezone}) · Reference{" "}
-                      <span className="font-mono text-xs">
+                      <span className="font-mono text-xs text-[var(--text-primary)]">
                         {upcomingInterview.booking_reference}
                       </span>
                     </p>
@@ -292,7 +336,7 @@ export function StudentDashboardView() {
                 {upcomingInterview ? (
                   <Link
                     href={`/student/interviews/${upcomingInterview.id}`}
-                    className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                    className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
                   >
                     <span>View Interview Details</span>
                     <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -300,7 +344,7 @@ export function StudentDashboardView() {
                 ) : eligibleUnbooked.length > 0 ? (
                   <Link
                     href={`/student/interviews/book?badgeId=${eligibleUnbooked[0].badge.id}`}
-                    className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                    className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)]"
                   >
                     <span>Schedule Slot</span>
                     <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -308,7 +352,7 @@ export function StudentDashboardView() {
                 ) : (
                   <Link
                     href="/student/badges"
-                    className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                    className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
                   >
                     <span>Inspect Badges</span>
                     <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -355,12 +399,7 @@ export function StudentDashboardView() {
                 {awardedBadgeCount}
               </p>
               <p className="mt-1 text-xs text-[var(--text-muted)]">
-                {
-                  awardRows.filter(
-                    (a) => a.awardStatus === "CERTIFICATION_PENDING"
-                  ).length
-                }{" "}
-                pending admin approval
+                {pendingCertCount} pending admin approval
               </p>
             </div>
 
@@ -379,7 +418,7 @@ export function StudentDashboardView() {
 
           {/* Malpractice Notice if relevant */}
           {activeMalpracticeAlerts.length > 0 ? (
-            <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--status-warning-bg)] p-5">
+            <section className="rounded-lg border border-[var(--status-warning)]/30 bg-[var(--status-warning-bg)] p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3">
                   <ShieldAlert
@@ -399,7 +438,7 @@ export function StudentDashboardView() {
                 </div>
                 <Link
                   href="/student/malpractice"
-                  className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-[var(--accent-text)] hover:underline"
+                  className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                 >
                   <span>View Status</span>
                   <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -418,12 +457,12 @@ export function StudentDashboardView() {
                     aria-hidden="true"
                   />
                   <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                    Badge Progress & Eligibility
+                    Badge Progress &amp; Eligibility
                   </h2>
                 </div>
                 <Link
                   href="/student/badges"
-                  className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                  className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                 >
                   All Badges
                 </Link>
@@ -474,7 +513,7 @@ export function StudentDashboardView() {
                           {row.eligibility?.eligible && !certMeta ? (
                             <Link
                               href={`/student/interviews/book?badgeId=${row.badge.id}`}
-                              className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                              className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                             >
                               Book
                             </Link>
@@ -496,12 +535,12 @@ export function StudentDashboardView() {
                     aria-hidden="true"
                   />
                   <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                    Recent Interview & Outcome
+                    Recent Interview &amp; Outcome
                   </h2>
                 </div>
                 <Link
                   href="/student/interviews"
-                  className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                  className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                 >
                   Interview History
                 </Link>
@@ -562,14 +601,14 @@ export function StudentDashboardView() {
                       {res?.retake_after ? (
                         <p className="text-xs text-[var(--status-warning)]">
                           Earliest eligible retake:{" "}
-                          <span className="tabular-nums font-medium">
+                          <span className="font-medium tabular-nums">
                             {formatTimestamp(res.retake_after)}
                           </span>
                         </p>
                       ) : null}
 
                       {certMeta ? (
-                        <div className="rounded-md bg-[var(--bg-elevated)] p-3">
+                        <div className="rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-3">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs font-medium text-[var(--text-secondary)]">
                               Certification Status
@@ -587,7 +626,7 @@ export function StudentDashboardView() {
 
                       <Link
                         href={`/student/interviews/${latestEvaluated.id}`}
-                        className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--accent-text)] hover:underline"
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                       >
                         <span>Inspect Full Details</span>
                         <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -603,7 +642,7 @@ export function StudentDashboardView() {
                   </p>
                   <Link
                     href={`/student/interviews/${interviews[0].id}`}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--accent-text)] hover:underline"
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                   >
                     <span>View Latest Interview</span>
                     <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -616,7 +655,7 @@ export function StudentDashboardView() {
                   action={
                     <Link
                       href="/student/interviews/book"
-                      className="inline-flex items-center rounded-md bg-[var(--accent-primary)] px-3.5 py-2 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                      className="inline-flex items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-3.5 py-2 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
                     >
                       Book Interview
                     </Link>
@@ -631,11 +670,11 @@ export function StudentDashboardView() {
             <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-5">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                  Certification & Integrity Timeline
+                  Certification &amp; Integrity Timeline
                 </h2>
                 <Link
                   href="/student/malpractice"
-                  className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                  className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                 >
                   View Full Status
                 </Link>

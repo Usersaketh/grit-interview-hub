@@ -2,7 +2,21 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getConfig } from "@backend/lib/config";
 
+function hasSupabaseAuthCookie(request: NextRequest): boolean {
+  return request.cookies
+    .getAll()
+    .some((cookie) => cookie.name.startsWith("sb-") && cookie.value.length > 0);
+}
+
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  // API routes handle authentication and cookie reads directly via requireUser/requireRole.
+  // Unauthenticated visitors with no sb-* cookie do not need a blocking remote auth round-trip.
+  if (pathname.startsWith("/api/") || !hasSupabaseAuthCookie(request)) {
+    return NextResponse.next({ request });
+  }
+
   let config;
   try {
     config = getConfig();
@@ -36,15 +50,15 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value, options }) => {
             response.cookies.set(name, value, options);
           });
-        }
-      }
+        },
+      },
     }
   );
 
   try {
     await supabase.auth.getUser();
   } catch {
-    // Allow public routes to render even if Supabase is unreachable
+    // Allow routes to render even if Supabase auth refresh is temporarily unreachable
   }
 
   return response;
@@ -52,6 +66,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"
-  ]
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

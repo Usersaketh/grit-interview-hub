@@ -519,3 +519,20 @@ export interface AuditLogPageResponse {
   limit: number;
   offset: number;
 }
+
+export interface StudentOverviewResponse {
+  student: {
+    id: string;
+    user_id: string;
+    external_student_id: string;
+    campus_ref: string | null;
+    created_at: string;
+  };
+  badges: BadgeSummary[];
+  requiredSkills: BadgeRequiredSkill[];
+  skillProgress: StudentSkillProgress[];
+  eligibilities: Record<string, EligibilityDecision>;
+  interviews: InterviewRecord[];
+  malpracticeStatus: StudentMalpracticeStatusResponse;
+}
+

@@ -32,6 +32,10 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+} from "@frontend/services/dataCache";
+import {
   fetchInterviewerAvailability,
   fetchOwnInterviewerRow,
   fetchScopedInterviews,
@@ -41,43 +45,83 @@ import type {
   InterviewerAvailabilityRecord,
 } from "@frontend/types/api";
 
+interface InterviewerOverviewCache {
+  interviews: InterviewRecord[];
+  availability: InterviewerAvailabilityRecord[];
+  defaultTimezone: string | null;
+}
+
+const CACHE_KEY = "interviewer:overview";
+
 export function InterviewerOverviewView() {
   const { profile } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const userId = profile?.id ?? null;
+  const isInterviewer = Boolean(
+    profile && hasAllowedRole(profile.roles, ["INTERVIEWER"])
+  );
+
+  const [data, setData] = useState<InterviewerOverviewCache | null>(() =>
+    userId ? (getCachedData<InterviewerOverviewCache>(userId, CACHE_KEY)?.data ?? null) : null
+  );
+  const [loading, setLoading] = useState<boolean>(() =>
+    userId ? !getCachedData<InterviewerOverviewCache>(userId, CACHE_KEY) : true
+  );
   const [error, setError] = useState<string | null>(null);
-  const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
-  const [availability, setAvailability] = useState<
-    InterviewerAvailabilityRecord[]
-  >([]);
-  const [defaultTimezone, setDefaultTimezone] = useState<string | null>(null);
 
-  const loadData = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["INTERVIEWER"])) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [ownInterviewer, allInterviews, availRows] = await Promise.all([
-        fetchOwnInterviewerRow(profile.id).catch(() => null),
-        fetchScopedInterviews(),
-        fetchInterviewerAvailability(),
-      ]);
+  const loadData = useCallback(
+    async (force = false) => {
+      if (!userId || !isInterviewer) return;
 
-      setDefaultTimezone(ownInterviewer?.default_timezone ?? null);
-      const scoped = ownInterviewer
-        ? allInterviews.filter((i) => i.interviewer_id === ownInterviewer.id)
-        : allInterviews;
-      setInterviews(scoped);
-      setAvailability(availRows);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+      const cached = getCachedData<InterviewerOverviewCache>(userId, CACHE_KEY);
+      if (cached && !force) {
+        setData(cached.data);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const result = await fetchWithUserCache<InterviewerOverviewCache>(
+          userId,
+          CACHE_KEY,
+          async () => {
+            const [ownInterviewer, allInterviews, availRows] = await Promise.all([
+              fetchOwnInterviewerRow(userId).catch(() => null),
+              fetchScopedInterviews(),
+              fetchInterviewerAvailability(),
+            ]);
+            const scoped = ownInterviewer
+              ? allInterviews.filter((i) => i.interviewer_id === ownInterviewer.id)
+              : allInterviews;
+            return {
+              interviews: scoped,
+              availability: availRows,
+              defaultTimezone: ownInterviewer?.default_timezone ?? null,
+            };
+          },
+          { force }
+        );
+        setData(result);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isInterviewer, userId]
+  );
 
   useEffect(() => {
-    void loadData();
+    void loadData(false);
   }, [loadData]);
+
+  const interviews = useMemo(() => data?.interviews ?? [], [data]);
+  const availability = useMemo(() => data?.availability ?? [], [data]);
+  const defaultTimezone = data?.defaultTimezone ?? null;
 
   const todaysInterviews = useMemo(
     () =>
@@ -137,7 +181,7 @@ export function InterviewerOverviewView() {
         actions={
           <Link
             href="/interviewer/availability"
-            className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
+            className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
           >
             <CalendarClock className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span>Manage Availability</span>
@@ -151,7 +195,7 @@ export function InterviewerOverviewView() {
           <SectionSkeleton rows={4} />
         </div>
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadData} />
+        <ErrorBanner message={error} onRetry={() => void loadData(true)} />
       ) : (
         <div className="space-y-6">
           {/* Metrics strip */}
@@ -210,7 +254,7 @@ export function InterviewerOverviewView() {
 
           {/* Pending Evaluations Spotlight */}
           {pendingEvaluations.length > 0 ? (
-            <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--status-warning-bg)] p-5">
+            <section className="rounded-lg border border-[var(--status-warning)]/30 bg-[var(--status-warning-bg)] p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3">
                   <ClipboardCheck
@@ -231,7 +275,7 @@ export function InterviewerOverviewView() {
                 </div>
                 <Link
                   href={`/interviewer/interviews/${pendingEvaluations[0].id}`}
-                  className="inline-flex min-h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-3.5 py-2 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                  className="inline-flex min-h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)]"
                 >
                   <span>Evaluate Next</span>
                   <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -255,7 +299,7 @@ export function InterviewerOverviewView() {
                 </div>
                 <Link
                   href="/interviewer/schedule"
-                  className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                  className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                 >
                   Full Schedule
                 </Link>
@@ -268,7 +312,7 @@ export function InterviewerOverviewView() {
                   action={
                     <Link
                       href="/interviewer/availability"
-                      className="inline-flex items-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                      className="inline-flex items-center whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
                     >
                       Configure Availability
                     </Link>
@@ -298,7 +342,7 @@ export function InterviewerOverviewView() {
                           <StatusText label={meta.label} tone={meta.tone} />
                           <Link
                             href={`/interviewer/interviews/${item.id}`}
-                            className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                            className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                           >
                             Open
                           </Link>
@@ -324,7 +368,7 @@ export function InterviewerOverviewView() {
                 </div>
                 <Link
                   href="/interviewer/availability"
-                  className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                  className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                 >
                   Edit Windows
                 </Link>
@@ -337,7 +381,7 @@ export function InterviewerOverviewView() {
                   action={
                     <Link
                       href="/interviewer/availability"
-                      className="inline-flex items-center rounded-md bg-[var(--accent-primary)] px-3.5 py-2 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                      className="inline-flex items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)]"
                     >
                       Add Availability
                     </Link>
@@ -386,7 +430,7 @@ export function InterviewerOverviewView() {
               </div>
               <Link
                 href="/interviewer/history"
-                className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
               >
                 All History
               </Link>
@@ -427,7 +471,7 @@ export function InterviewerOverviewView() {
                         ) : null}
                         <Link
                           href={`/interviewer/interviews/${item.id}`}
-                          className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                          className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                         >
                           View
                         </Link>

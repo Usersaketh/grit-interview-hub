@@ -12,6 +12,7 @@ export type ThemeMode = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
 
 const STORAGE_KEY = "grit-theme";
+const DEFAULT_THEME_MODE: ThemeMode = "dark";
 
 interface ThemeContextValue {
   mode: ThemeMode;
@@ -22,7 +23,7 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function resolveSystemTheme(): ResolvedTheme {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "dark";
   return window.matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark"
     : "light";
@@ -44,11 +45,11 @@ function applyThemeToDocument(mode: ThemeMode): ResolvedTheme {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>("system");
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>("light");
+  const [mode, setModeState] = useState<ThemeMode>(DEFAULT_THEME_MODE);
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>("dark");
 
   useEffect(() => {
-    let initial: ThemeMode = "system";
+    let initial: ThemeMode = DEFAULT_THEME_MODE;
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
       if (saved === "light" || saved === "dark" || saved === "system") {
@@ -64,11 +65,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const onSystemChange = () => {
       try {
         const current = window.localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-        if (!current || current === "system") {
+        if (current === "system") {
           setResolvedTheme(applyThemeToDocument("system"));
         }
       } catch {
-        setResolvedTheme(applyThemeToDocument("system"));
+        // Keep current resolved theme
       }
     };
     media.addEventListener("change", onSystemChange);

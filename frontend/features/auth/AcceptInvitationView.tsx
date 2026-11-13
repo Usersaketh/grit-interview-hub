@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   MailCheck,
+  Terminal,
 } from "lucide-react";
 import { StatusText } from "@frontend/components/StatusText";
 import { ThemeSwitch } from "@frontend/components/ThemeSwitch";
@@ -107,16 +108,19 @@ export function AcceptInvitationView() {
         ...(!profile && password ? { password } : {}),
       });
 
-      await refreshProfile();
+      await refreshProfile({ silent: true, force: true });
       setAccepted(true);
       pushToast({
         title: "Interviewer invitation accepted",
         description: "Your INTERVIEWER portal access is now active.",
         tone: "success",
       });
-      router.push("/interviewer");
+      router.replace("/interviewer");
     } catch (err) {
-      if (err instanceof ApiClientError && err.code === "ACCOUNT_EXISTS_SIGN_IN_REQUIRED") {
+      if (
+        err instanceof ApiClientError &&
+        err.code === "ACCOUNT_EXISTS_SIGN_IN_REQUIRED"
+      ) {
         setAccountExistsError(true);
       }
       setSubmitError(formatApiErrorMessage(err));
@@ -126,23 +130,33 @@ export function AcceptInvitationView() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)]">
-      <header className="flex h-14 items-center justify-between gap-4 border-b border-[var(--border-hairline)] bg-[var(--bg-surface)] px-4 sm:px-8">
+    <div className="relative flex min-h-screen flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)]">
+      <div
+        aria-hidden="true"
+        className="grit-grid-bg pointer-events-none absolute inset-x-0 top-0 h-[420px] opacity-30 [mask-image:linear-gradient(to_bottom,black,transparent)]"
+      />
+
+      <header className="relative z-10 flex h-14 items-center justify-between gap-4 border-b border-[var(--border-hairline)] bg-[var(--bg-glass)] px-4 backdrop-blur-md sm:px-8">
         <Link
           href="/"
-          className="whitespace-nowrap text-base font-semibold tracking-tight text-[var(--text-primary)]"
+          className="flex items-center gap-2.5 whitespace-nowrap text-sm font-semibold tracking-tight text-[var(--text-primary)]"
         >
-          GRIT Interview Hub
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--accent-primary)]">
+            <Terminal className="h-3.5 w-3.5" aria-hidden="true" />
+          </span>
+          <span>GRIT Interview Hub</span>
         </Link>
         <ThemeSwitch />
       </header>
 
-      <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-lg rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6 sm:p-8">
-          <div className="mb-6 flex items-center gap-2.5">
-            <MailCheck className="h-5 w-5 text-[var(--accent-primary)]" aria-hidden="true" />
+      <main className="relative z-10 flex flex-1 items-center justify-center px-4 py-10">
+        <div className="w-full max-w-lg rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6 shadow-[var(--shadow-elevated)] sm:p-8">
+          <div className="mb-6 flex items-center gap-3">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--accent-primary)]">
+              <MailCheck className="h-4 w-4" aria-hidden="true" />
+            </span>
             <div>
-              <p className="text-xs font-medium text-[var(--accent-text)]">
+              <p className="font-mono text-[11px] font-medium uppercase tracking-wider text-[var(--accent-text)]">
                 Invitation-Only Assessor Onboarding
               </p>
               <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">
@@ -159,22 +173,25 @@ export function AcceptInvitationView() {
             <div className="space-y-4">
               <div
                 role="alert"
-                className="flex items-start gap-2.5 rounded-md border border-[var(--border-hairline)] bg-[var(--status-error-bg)] p-4 text-sm text-[var(--status-error)]"
+                className="flex items-start gap-2.5 rounded-md border border-[var(--status-error)]/30 bg-[var(--status-error-bg)] p-4 text-sm text-[var(--status-error)]"
               >
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                 <span>{verifyError ?? "Invalid invitation link."}</span>
               </div>
               <Link
                 href="/"
-                className="inline-flex min-h-10 items-center rounded-md border border-[var(--border-hairline)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md border border-[var(--border-hairline)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
               >
                 Return Home
               </Link>
             </div>
           ) : accepted ? (
             <div className="space-y-4">
-              <div className="flex items-start gap-3 rounded-md bg-[var(--status-success-bg)] p-4">
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-[var(--status-success)]" aria-hidden="true" />
+              <div className="flex items-start gap-3 rounded-md border border-[var(--status-success)]/30 bg-[var(--status-success-bg)] p-4">
+                <CheckCircle2
+                  className="mt-0.5 h-5 w-5 shrink-0 text-[var(--status-success)]"
+                  aria-hidden="true"
+                />
                 <div>
                   <p className="text-sm font-semibold text-[var(--text-primary)]">
                     Interviewer Access Activated
@@ -186,7 +203,7 @@ export function AcceptInvitationView() {
               </div>
               <Link
                 href="/interviewer"
-                className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
               >
                 <span>Open Interviewer Portal</span>
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -195,9 +212,9 @@ export function AcceptInvitationView() {
           ) : (
             <div className="space-y-5">
               <div className="rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-4 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-[var(--text-primary)]">
-                    Invited Email: {inviteInfo.email}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-mono font-semibold text-[var(--text-primary)]">
+                    {inviteInfo.email}
                   </span>
                   <StatusText
                     label={getInvitationStatusMeta(inviteInfo.status).label}
@@ -207,7 +224,7 @@ export function AcceptInvitationView() {
                 <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
                     <dt className="text-[var(--text-muted)]">Assigned Role</dt>
-                    <dd className="font-medium text-[var(--text-primary)]">
+                    <dd className="font-mono font-medium text-[var(--text-primary)]">
                       INTERVIEWER
                     </dd>
                   </div>
@@ -237,7 +254,7 @@ export function AcceptInvitationView() {
               {inviteInfo.status !== "PENDING" ? (
                 <div
                   role="alert"
-                  className="rounded-md border border-[var(--border-hairline)] bg-[var(--status-warning-bg)] p-4 text-xs text-[var(--text-primary)]"
+                  className="rounded-md border border-[var(--status-warning)]/30 bg-[var(--status-warning-bg)] p-4 text-xs text-[var(--text-primary)]"
                 >
                   This invitation is currently <strong>{inviteInfo.status}</strong>{" "}
                   and can no longer be redeemed. Request a new invitation from an
@@ -246,7 +263,7 @@ export function AcceptInvitationView() {
               ) : profile && !emailMatchesSignedIn ? (
                 <div
                   role="alert"
-                  className="space-y-3 rounded-md border border-[var(--border-hairline)] bg-[var(--status-warning-bg)] p-4 text-xs text-[var(--text-primary)]"
+                  className="space-y-3 rounded-md border border-[var(--status-warning)]/30 bg-[var(--status-warning-bg)] p-4 text-xs text-[var(--text-primary)]"
                 >
                   <p>
                     You are currently signed in as{" "}
@@ -266,7 +283,7 @@ export function AcceptInvitationView() {
                   {submitError ? (
                     <div
                       role="alert"
-                      className="rounded-md border border-[var(--border-hairline)] bg-[var(--status-error-bg)] p-3 text-xs text-[var(--status-error)]"
+                      className="rounded-md border border-[var(--status-error)]/30 bg-[var(--status-error-bg)] p-3 text-xs text-[var(--status-error)]"
                     >
                       <p>{submitError}</p>
                       {accountExistsError ? (
@@ -294,7 +311,7 @@ export function AcceptInvitationView() {
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="Your full name"
-                      className="block w-full rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                      className="block w-full rounded-md border border-[var(--border-hairline)] bg-[var(--bg-canvas)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
                     />
                   </div>
 
@@ -314,7 +331,7 @@ export function AcceptInvitationView() {
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             placeholder="Minimum 8 chars with letters & numbers"
-                            className="block w-full rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] py-2 pl-3 pr-10 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                            className="block w-full rounded-md border border-[var(--border-hairline)] bg-[var(--bg-canvas)] py-2 pl-3 pr-10 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
                           />
                           <button
                             type="button"
@@ -344,7 +361,7 @@ export function AcceptInvitationView() {
                           value={confirmPassword}
                           onChange={(e) => setConfirmPassword(e.target.value)}
                           placeholder="Re-enter your password"
-                          className="block w-full rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                          className="block w-full rounded-md border border-[var(--border-hairline)] bg-[var(--bg-canvas)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
                         />
                       </div>
                     </>
@@ -358,7 +375,7 @@ export function AcceptInvitationView() {
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] disabled:opacity-55"
+                    className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] disabled:opacity-55"
                   >
                     <span>
                       {submitting

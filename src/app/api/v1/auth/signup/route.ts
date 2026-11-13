@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { errorResponse } from "@backend/lib/errors";
+import { resolveRequestOrigin } from "@backend/lib/origin";
 import { enforceRateLimit, getClientIp } from "@backend/lib/rateLimit";
 import { createSupabaseServerClient } from "@backend/lib/supabase/server";
 import { registerStudentAccount } from "@backend/modules/auth/service";
@@ -17,9 +18,10 @@ export async function POST(request: Request) {
     });
 
     const rawBody = await request.json();
-    const origin = new URL(request.url).origin;
+    const origin = resolveRequestOrigin(request);
+    const emailRedirectTo = `${origin}/auth/callback?next=${encodeURIComponent("/student")}`;
     const db = await createSupabaseServerClient();
-    const data = await registerStudentAccount(db, rawBody, `${origin}/login`);
+    const data = await registerStudentAccount(db, rawBody, emailRedirectTo);
 
     return NextResponse.json({ data }, { status: 201 });
   } catch (error) {

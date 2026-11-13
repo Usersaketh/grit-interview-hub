@@ -20,6 +20,10 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+} from "@frontend/services/dataCache";
+import {
   fetchInterviewerAvailability,
   fetchScopedInterviews,
   fetchStaffInterviewersRoster,
@@ -30,12 +34,35 @@ import type {
   InterviewerRosterItem,
 } from "@frontend/types/api";
 
+interface OpsAvailabilityCache {
+  windows: InterviewerAvailabilityRecord[];
+  interviewers: InterviewerRosterItem[];
+  interviews: InterviewRecord[];
+}
+
+const CACHE_KEY = "ops:availability";
+
 export function OperationsAvailabilityView() {
   const { profile } = useAuth();
-  const [windows, setWindows] = useState<InterviewerAvailabilityRecord[]>([]);
-  const [interviewers, setInterviewers] = useState<InterviewerRosterItem[]>([]);
-  const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const userId = profile?.id ?? null;
+  const isStaff = Boolean(
+    profile && hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])
+  );
+
+  const initialCached = userId
+    ? getCachedData<OpsAvailabilityCache>(userId, CACHE_KEY)?.data ?? null
+    : null;
+
+  const [windows, setWindows] = useState<InterviewerAvailabilityRecord[]>(
+    () => initialCached?.windows ?? []
+  );
+  const [interviewers, setInterviewers] = useState<InterviewerRosterItem[]>(
+    () => initialCached?.interviewers ?? []
+  );
+  const [interviews, setInterviews] = useState<InterviewRecord[]>(
+    () => initialCached?.interviews ?? []
+  );
+  const [loading, setLoading] = useState<boolean>(() => !initialCached);
   const [error, setError] = useState<string | null>(null);
 
   const [interviewerFilter, setInterviewerFilter] = useState("ALL");
@@ -44,32 +71,58 @@ export function OperationsAvailabilityView() {
     "ALL"
   );
 
-  const loadData = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [availData, rosterData, interviewsData] = await Promise.all([
-        fetchInterviewerAvailability(),
-        fetchStaffInterviewersRoster().catch(
-          () => [] as InterviewerRosterItem[]
-        ),
-        fetchScopedInterviews().catch(() => [] as InterviewRecord[]),
-      ]);
-      setWindows(availData);
-      setInterviewers(rosterData);
-      setInterviews(interviewsData);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+  const loadData = useCallback(
+    async (force = false) => {
+      if (!userId || !isStaff) return;
+
+      const cached = getCachedData<OpsAvailabilityCache>(userId, CACHE_KEY);
+      if (cached && !force) {
+        setWindows(cached.data.windows);
+        setInterviewers(cached.data.interviewers);
+        setInterviews(cached.data.interviews);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const result = await fetchWithUserCache<OpsAvailabilityCache>(
+          userId,
+          CACHE_KEY,
+          async () => {
+            const [availData, rosterData, interviewsData] = await Promise.all([
+              fetchInterviewerAvailability(),
+              fetchStaffInterviewersRoster().catch(
+                () => [] as InterviewerRosterItem[]
+              ),
+              fetchScopedInterviews().catch(() => [] as InterviewRecord[]),
+            ]);
+            return {
+              windows: availData,
+              interviewers: rosterData,
+              interviews: interviewsData,
+            };
+          },
+          { force }
+        );
+        setWindows(result.windows);
+        setInterviewers(result.interviewers);
+        setInterviews(result.interviews);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isStaff, userId]
+  );
 
   useEffect(() => {
-    void loadData();
+    void loadData(false);
   }, [loadData]);
 
   const interviewerMap = useMemo(
@@ -139,7 +192,7 @@ export function OperationsAvailabilityView() {
               id="ops-avail-interviewer"
               value={interviewerFilter}
               onChange={(e) => setInterviewerFilter(e.target.value)}
-              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
             >
               <option value="ALL">All Interviewers</option>
               {interviewers.map((item) => (
@@ -158,7 +211,7 @@ export function OperationsAvailabilityView() {
               id="ops-avail-day"
               value={dayFilter}
               onChange={(e) => setDayFilter(e.target.value)}
-              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
             >
               <option value="ALL">All Weekdays</option>
               {DAY_OF_WEEK_LABELS.map((label, idx) => (
@@ -181,7 +234,7 @@ export function OperationsAvailabilityView() {
                   e.target.value as "ALL" | "ACTIVE" | "INACTIVE"
                 )
               }
-              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
             >
               <option value="ALL">All Window States</option>
               <option value="ACTIVE">Active Only</option>
@@ -194,7 +247,7 @@ export function OperationsAvailabilityView() {
       {loading ? (
         <SectionSkeleton rows={5} />
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadData} />
+        <ErrorBanner message={error} onRetry={() => void loadData(true)} />
       ) : filtered.length === 0 ? (
         <EmptyState
           title="No availability windows found"
@@ -207,7 +260,7 @@ export function OperationsAvailabilityView() {
               <thead>
                 <tr className="border-b border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-xs font-medium text-[var(--text-secondary)]">
                   <th className="px-4 py-3">Interviewer</th>
-                  <th className="px-4 py-3">Weekday & Window</th>
+                  <th className="px-4 py-3">Weekday &amp; Window</th>
                   <th className="px-4 py-3">Timezone</th>
                   <th className="px-4 py-3">Effective Dates</th>
                   <th className="px-4 py-3">Upcoming Bookings</th>

@@ -3,53 +3,72 @@
 
 @layer base {
   :root {
-    --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    --bg-canvas: #f7f8fa;
+
+    /* Light Surface System (Vercel-inspired crisp alabaster) */
+    --bg-canvas: #f7f8fb;
     --bg-surface: #ffffff;
-    --bg-elevated: #f1f3f6;
-    --bg-subtle: #eef0f4;
-    --text-primary: #171a21;
-    --text-secondary: #5c667a;
-    --text-muted: #768094;
-    --border-hairline: #e4e7ec;
-    --border-strong: #cfd5df;
-    --accent-primary: #2f4f9d;
-    --accent-primary-hover: #243e7d;
-    --accent-soft: #edf1fa;
-    --accent-text: #243e7d;
+    --bg-elevated: #f0f2f7;
+    --bg-subtle: #e7eaf2;
+    --bg-glass: rgba(255, 255, 255, 0.85);
+
+    --text-primary: #0f1117;
+    --text-secondary: #4e5669;
+    --text-muted: #768096;
+
+    --border-hairline: #e3e6ef;
+    --border-strong: #cbd2e1;
+
+    --accent-primary: #3b52d9;
+    --accent-primary-hover: #2d42bd;
+    --accent-soft: rgba(59, 82, 217, 0.1);
+    --accent-text: #2d42bd;
+    --accent-warm: #e5484d;
+
     --status-success: #15803d;
-    --status-success-bg: #ecfdf3;
+    --status-success-bg: rgba(21, 128, 61, 0.08);
     --status-warning: #b45309;
-    --status-warning-bg: #fffbeb;
-    --status-error: #b91c1c;
-    --status-error-bg: #fef2f2;
+    --status-warning-bg: rgba(180, 83, 9, 0.08);
+    --status-error: #c81e1e;
+    --status-error-bg: rgba(200, 30, 30, 0.08);
     --status-info: #1d4ed8;
-    --status-info-bg: #eff6ff;
+    --status-info-bg: rgba(29, 78, 216, 0.08);
+
+    --shadow-elevated: 0 1px 2px rgba(15, 17, 23, 0.04), 0 8px 24px -8px rgba(15, 17, 23, 0.08);
   }
 
   .dark {
-    --bg-canvas: #111318;
-    --bg-surface: #191d24;
-    --bg-elevated: #202630;
-    --bg-subtle: #242b36;
-    --text-primary: #f2f4f7;
-    --text-secondary: #a0a8b5;
-    --text-muted: #7f8896;
-    --border-hairline: #2b313c;
-    --border-strong: #394250;
-    --accent-primary: #5b7cfa;
-    --accent-primary-hover: #7491fc;
-    --accent-soft: #1d253b;
-    --accent-text: #a5b8ff;
-    --status-success: #4ade80;
-    --status-success-bg: #0f291a;
+    /* Dark Surface System (Vercel obsidian precision + Raycast layered contrast) */
+    --bg-canvas: #090a0e;
+    --bg-surface: #101218;
+    --bg-elevated: #171a23;
+    --bg-subtle: #1e222e;
+    --bg-glass: rgba(16, 18, 24, 0.82);
+
+    --text-primary: #f3f5f9;
+    --text-secondary: #9aa3b5;
+    --text-muted: #687185;
+
+    --border-hairline: rgba(255, 255, 255, 0.085);
+    --border-strong: rgba(255, 255, 255, 0.16);
+
+    --accent-primary: #5e72eb;
+    --accent-primary-hover: #7385f5;
+    --accent-soft: rgba(94, 114, 235, 0.14);
+    --accent-text: #a5b4ff;
+    --accent-warm: #ff6363;
+
+    --status-success: #34d399;
+    --status-success-bg: rgba(52, 211, 153, 0.1);
     --status-warning: #fbbf24;
-    --status-warning-bg: #2a200b;
+    --status-warning-bg: rgba(251, 191, 36, 0.1);
     --status-error: #f87171;
-    --status-error-bg: #2e1518;
+    --status-error-bg: rgba(248, 113, 113, 0.1);
     --status-info: #60a5fa;
-    --status-info-bg: #152238;
+    --status-info-bg: rgba(96, 165, 250, 0.1);
+
+    --shadow-elevated: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 32px -12px rgba(0, 0, 0, 0.6);
   }
 
   html {
@@ -79,6 +98,21 @@
   .font-mono {
     font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
+}
+
+.grit-grid-bg {
+  background-image:
+    linear-gradient(to right, var(--border-hairline) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border-hairline) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.grit-spotlight {
+  background: radial-gradient(
+    640px circle at 50% 0%,
+    var(--accent-soft),
+    transparent 70%
+  );
 }
 
 @media (prefers-reduced-motion: reduce) {

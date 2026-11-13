@@ -35,6 +35,7 @@ import type {
   RescheduleBookingPayload,
   SlotsDiscoveryResponse,
   StudentMalpracticeStatusResponse,
+  StudentOverviewResponse,
   StudentRosterItem,
   StudentSignupPayload,
   StudentSignupResponse,
@@ -74,6 +75,10 @@ export function acceptInvitationToken(
 
 export function fetchProfile(): Promise<UserProfile> {
   return apiRequest<UserProfile>("/api/v1/profile");
+}
+
+export function fetchStudentOverview(): Promise<StudentOverviewResponse> {
+  return apiRequest<StudentOverviewResponse>("/api/v1/student/overview");
 }
 
 export function fetchBadgeEligibility(

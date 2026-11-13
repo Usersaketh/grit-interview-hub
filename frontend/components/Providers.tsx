@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { MotionConfig } from "motion/react";
 import { AuthProvider } from "@frontend/hooks/useAuth";
 import { ThemeProvider } from "@frontend/hooks/useTheme";
 import { ToastProvider } from "@frontend/hooks/useToast";
@@ -23,10 +24,12 @@ export function Providers({
   }, [publicConfig]);
 
   return (
-    <ThemeProvider>
-      <ToastProvider>
-        <AuthProvider>{children}</AuthProvider>
-      </ToastProvider>
-    </ThemeProvider>
+    <MotionConfig reducedMotion="user">
+      <ThemeProvider>
+        <ToastProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </ToastProvider>
+      </ThemeProvider>
+    </MotionConfig>
   );
 }

@@ -21,43 +21,79 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+} from "@frontend/services/dataCache";
+import {
   fetchOwnInterviewerRow,
   fetchScopedInterviews,
 } from "@frontend/services/hubApi";
 import type { EvaluationOutcome, InterviewRecord } from "@frontend/types/api";
 
+const CACHE_KEY = "interviewer:interviews";
+
 export function InterviewerHistoryView() {
   const { profile } = useAuth();
-  const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const userId = profile?.id ?? null;
+  const isInterviewer = Boolean(
+    profile && hasAllowedRole(profile.roles, ["INTERVIEWER"])
+  );
+
+  const [interviews, setInterviews] = useState<InterviewRecord[]>(() =>
+    userId ? (getCachedData<InterviewRecord[]>(userId, CACHE_KEY)?.data ?? []) : []
+  );
+  const [loading, setLoading] = useState<boolean>(() =>
+    userId ? !getCachedData<InterviewRecord[]>(userId, CACHE_KEY) : true
+  );
   const [error, setError] = useState<string | null>(null);
   const [outcomeFilter, setOutcomeFilter] = useState<
     "ALL" | EvaluationOutcome
   >("ALL");
   const [query, setQuery] = useState("");
 
-  const loadHistory = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["INTERVIEWER"])) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [ownInterviewer, allInterviews] = await Promise.all([
-        fetchOwnInterviewerRow(profile.id).catch(() => null),
-        fetchScopedInterviews(),
-      ]);
-      const scoped = ownInterviewer
-        ? allInterviews.filter((i) => i.interviewer_id === ownInterviewer.id)
-        : allInterviews;
-      setInterviews(scoped);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+  const loadHistory = useCallback(
+    async (force = false) => {
+      if (!userId || !isInterviewer) return;
+
+      const cached = getCachedData<InterviewRecord[]>(userId, CACHE_KEY);
+      if (cached && !force) {
+        setInterviews(cached.data);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const scoped = await fetchWithUserCache<InterviewRecord[]>(
+          userId,
+          CACHE_KEY,
+          async () => {
+            const [ownInterviewer, allInterviews] = await Promise.all([
+              fetchOwnInterviewerRow(userId).catch(() => null),
+              fetchScopedInterviews(),
+            ]);
+            return ownInterviewer
+              ? allInterviews.filter((i) => i.interviewer_id === ownInterviewer.id)
+              : allInterviews;
+          },
+          { force }
+        );
+        setInterviews(scoped);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isInterviewer, userId]
+  );
 
   useEffect(() => {
-    void loadHistory();
+    void loadHistory(false);
   }, [loadHistory]);
 
   const pastRecords = useMemo(() => {
@@ -105,7 +141,7 @@ export function InterviewerHistoryView() {
               className={`min-h-9 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 outcomeFilter === tab
                   ? "bg-[var(--accent-primary)] text-white"
-                  : "border border-[var(--border-hairline)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                  : "border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
               }`}
             >
               {tab === "ALL" ? "All History" : tab.replace("_", " ")}
@@ -124,7 +160,7 @@ export function InterviewerHistoryView() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search reference or badge..."
             aria-label="Search evaluation history"
-            className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none sm:w-56"
+            className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none sm:w-56"
           />
         </div>
       </div>
@@ -132,7 +168,7 @@ export function InterviewerHistoryView() {
       {loading ? (
         <SectionSkeleton rows={5} />
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadHistory} />
+        <ErrorBanner message={error} onRetry={() => void loadHistory(true)} />
       ) : pastRecords.length === 0 ? (
         <EmptyState
           title="No historical records found"
@@ -144,7 +180,7 @@ export function InterviewerHistoryView() {
             <table className="w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-xs font-medium text-[var(--text-secondary)]">
-                  <th className="px-4 py-3">Badge & Reference</th>
+                  <th className="px-4 py-3">Badge &amp; Reference</th>
                   <th className="px-4 py-3">Interview Time</th>
                   <th className="px-4 py-3">Booking Status</th>
                   <th className="px-4 py-3">Outcome</th>

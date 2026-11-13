@@ -21,6 +21,10 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+} from "@frontend/services/dataCache";
+import {
   fetchScopedInterviews,
   fetchStaffInterviewersRoster,
   fetchStaffStudentsRoster,
@@ -34,16 +38,38 @@ import type {
 } from "@frontend/types/api";
 
 const PAGE_SIZE = 15;
+const CACHE_KEY = "ops:interviews";
+
+interface OpsInterviewsCache {
+  interviews: InterviewRecord[];
+  students: StudentRosterItem[];
+  interviewers: InterviewerRosterItem[];
+}
 
 export function OperationsInterviewsView() {
   const { profile } = useAuth();
+  const userId = profile?.id ?? null;
+  const isStaff = Boolean(
+    profile && hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])
+  );
+
   const searchParams = useSearchParams();
   const initialStudentId = searchParams.get("studentId") ?? "";
 
-  const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
-  const [students, setStudents] = useState<StudentRosterItem[]>([]);
-  const [interviewers, setInterviewers] = useState<InterviewerRosterItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialCached = userId
+    ? getCachedData<OpsInterviewsCache>(userId, CACHE_KEY)?.data ?? null
+    : null;
+
+  const [interviews, setInterviews] = useState<InterviewRecord[]>(
+    () => initialCached?.interviews ?? []
+  );
+  const [students, setStudents] = useState<StudentRosterItem[]>(
+    () => initialCached?.students ?? []
+  );
+  const [interviewers, setInterviewers] = useState<InterviewerRosterItem[]>(
+    () => initialCached?.interviewers ?? []
+  );
+  const [loading, setLoading] = useState<boolean>(() => !initialCached);
   const [error, setError] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<"ALL" | BookingStatus>("ALL");
@@ -53,33 +79,61 @@ export function OperationsInterviewsView() {
   const [query, setQuery] = useState(initialStudentId);
   const [page, setPage] = useState(1);
 
-  const loadData = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [interviewsData, studentsData, interviewersData] =
-        await Promise.all([
-          fetchScopedInterviews(),
-          fetchStaffStudentsRoster().catch(() => [] as StudentRosterItem[]),
-          fetchStaffInterviewersRoster().catch(
-            () => [] as InterviewerRosterItem[]
-          ),
-        ]);
-      setInterviews(interviewsData);
-      setStudents(studentsData);
-      setInterviewers(interviewersData);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+  const loadData = useCallback(
+    async (force = false) => {
+      if (!userId || !isStaff) return;
+
+      const cached = getCachedData<OpsInterviewsCache>(userId, CACHE_KEY);
+      if (cached && !force) {
+        setInterviews(cached.data.interviews);
+        setStudents(cached.data.students);
+        setInterviewers(cached.data.interviewers);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const result = await fetchWithUserCache<OpsInterviewsCache>(
+          userId,
+          CACHE_KEY,
+          async () => {
+            const [interviewsData, studentsData, interviewersData] =
+              await Promise.all([
+                fetchScopedInterviews(),
+                fetchStaffStudentsRoster().catch(
+                  () => [] as StudentRosterItem[]
+                ),
+                fetchStaffInterviewersRoster().catch(
+                  () => [] as InterviewerRosterItem[]
+                ),
+              ]);
+            return {
+              interviews: interviewsData,
+              students: studentsData,
+              interviewers: interviewersData,
+            };
+          },
+          { force }
+        );
+        setInterviews(result.interviews);
+        setStudents(result.students);
+        setInterviewers(result.interviewers);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isStaff, userId]
+  );
 
   useEffect(() => {
-    void loadData();
+    void loadData(false);
   }, [loadData]);
 
   const studentMap = useMemo(
@@ -157,7 +211,7 @@ export function OperationsInterviewsView() {
                 setStatusFilter(e.target.value as "ALL" | BookingStatus);
                 setPage(1);
               }}
-              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
             >
               <option value="ALL">All Booking Statuses</option>
               <option value="BOOKED">Booked</option>
@@ -182,7 +236,7 @@ export function OperationsInterviewsView() {
                 setOutcomeFilter(e.target.value as "ALL" | EvaluationOutcome);
                 setPage(1);
               }}
-              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
             >
               <option value="ALL">All Outcomes</option>
               <option value="PASS">Pass</option>
@@ -206,7 +260,7 @@ export function OperationsInterviewsView() {
             }}
             placeholder="Search reference, student, badge..."
             aria-label="Search operations interviews"
-            className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none sm:w-64"
+            className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none sm:w-64"
           />
         </div>
       </div>
@@ -214,7 +268,7 @@ export function OperationsInterviewsView() {
       {loading ? (
         <SectionSkeleton rows={6} />
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadData} />
+        <ErrorBanner message={error} onRetry={() => void loadData(true)} />
       ) : filtered.length === 0 ? (
         <EmptyState
           title="No interviews match current filters"
@@ -227,7 +281,7 @@ export function OperationsInterviewsView() {
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-xs font-medium text-[var(--text-secondary)]">
-                    <th className="px-4 py-3">Reference & Badge</th>
+                    <th className="px-4 py-3">Reference &amp; Badge</th>
                     <th className="px-4 py-3">Student</th>
                     <th className="px-4 py-3">Interviewer</th>
                     <th className="px-4 py-3">Scheduled Time</th>
@@ -321,7 +375,7 @@ export function OperationsInterviewsView() {
                   type="button"
                   disabled={safePage <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="inline-flex min-h-8 items-center gap-1 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] disabled:opacity-40"
+                  className="inline-flex min-h-8 items-center gap-1 whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] px-2.5 py-1 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)] disabled:opacity-40"
                 >
                   <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
                   <span>Previous</span>
@@ -333,7 +387,7 @@ export function OperationsInterviewsView() {
                   type="button"
                   disabled={safePage >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className="inline-flex min-h-8 items-center gap-1 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] disabled:opacity-40"
+                  className="inline-flex min-h-8 items-center gap-1 whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] px-2.5 py-1 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)] disabled:opacity-40"
                 >
                   <span>Next</span>
                   <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />

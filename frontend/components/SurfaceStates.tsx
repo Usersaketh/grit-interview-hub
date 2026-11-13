@@ -7,7 +7,7 @@ export function SectionSkeleton({ rows = 4 }: { rows?: number }) {
       aria-label="Loading content"
       className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-5"
     >
-      <div className="mb-4 h-4 w-40 rounded bg-[var(--bg-elevated)]" />
+      <div className="mb-4 h-3.5 w-36 rounded bg-[var(--bg-elevated)]" />
       <div className="space-y-3">
         {Array.from({ length: rows }).map((_, idx) => (
           <div
@@ -79,7 +79,7 @@ export function ErrorBanner({
   return (
     <div
       role="alert"
-      className="flex flex-col gap-3 rounded-lg border border-[var(--border-hairline)] bg-[var(--status-error-bg)] p-4 sm:flex-row sm:items-center sm:justify-between"
+      className="flex flex-col gap-3 rounded-lg border border-[var(--status-error)]/30 bg-[var(--status-error-bg)] p-4 sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="flex items-start gap-3">
         <AlertCircle
@@ -99,7 +99,7 @@ export function ErrorBanner({
         <button
           type="button"
           onClick={onRetry}
-          className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] sm:self-center"
+          className="inline-flex shrink-0 items-center gap-1.5 self-start whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-elevated)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] sm:self-center"
         >
           <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
           <span>Retry</span>

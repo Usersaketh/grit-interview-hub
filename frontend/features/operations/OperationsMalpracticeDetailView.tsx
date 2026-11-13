@@ -27,6 +27,11 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+  invalidateUserCache,
+} from "@frontend/services/dataCache";
+import {
   fetchBadgesCatalog,
   fetchMalpracticeQueue,
   fetchStaffStudentsRoster,
@@ -48,6 +53,12 @@ type ActiveDialog =
   | { type: "reinstate" }
   | null;
 
+interface MalpracticeDetailCache {
+  report: MalpracticeQueueRow | null;
+  student: StudentRosterItem | null;
+  badge: BadgeSummary | null;
+}
+
 export function OperationsMalpracticeDetailView({
   reportId,
 }: {
@@ -55,16 +66,34 @@ export function OperationsMalpracticeDetailView({
 }) {
   const { profile } = useAuth();
   const { pushToast } = useToast();
+  const userId = profile?.id ?? null;
+  const isStaff = Boolean(
+    profile && hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])
+  );
+  const cacheKey = `ops:malpractice:${reportId}`;
 
-  const [report, setReport] = useState<MalpracticeQueueRow | null>(null);
-  const [student, setStudent] = useState<StudentRosterItem | null>(null);
-  const [badge, setBadge] = useState<BadgeSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const initialCached = userId
+    ? getCachedData<MalpracticeDetailCache>(userId, cacheKey)?.data ?? null
+    : null;
+
+  const [report, setReport] = useState<MalpracticeQueueRow | null>(
+    () => initialCached?.report ?? null
+  );
+  const [student, setStudent] = useState<StudentRosterItem | null>(
+    () => initialCached?.student ?? null
+  );
+  const [badge, setBadge] = useState<BadgeSummary | null>(
+    () => initialCached?.badge ?? null
+  );
+  const [loading, setLoading] = useState<boolean>(() => !initialCached);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedTransition, setSelectedTransition] = useState<
     MalpracticeReviewTargetStatus | ""
-  >("");
+  >(() => {
+    if (!initialCached?.report) return "";
+    return getAllowedReviewTransitions(initialCached.report.status)[0] ?? "";
+  });
   const [reviewerNotes, setReviewerNotes] = useState("");
   const [reinstateReason, setReinstateReason] = useState("");
   const [reinstateError, setReinstateError] = useState<string | null>(null);
@@ -78,37 +107,67 @@ export function OperationsMalpracticeDetailView({
   const [lastAwardUpdate, setLastAwardUpdate] =
     useState<BadgeAwardRecord | null>(null);
 
-  const loadCase = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])) {
-      return;
+  const applyDetail = useCallback((payload: MalpracticeDetailCache) => {
+    setReport(payload.report);
+    setStudent(payload.student);
+    setBadge(payload.badge);
+    if (payload.report) {
+      const allowed = getAllowedReviewTransitions(payload.report.status);
+      setSelectedTransition(allowed[0] ?? "");
     }
-    setLoading(true);
-    setError(null);
-    try {
-      const [queueData, studentsData, badgesData] = await Promise.all([
-        fetchMalpracticeQueue(),
-        fetchStaffStudentsRoster().catch(() => [] as StudentRosterItem[]),
-        fetchBadgesCatalog().catch(() => [] as BadgeSummary[]),
-      ]);
+  }, []);
 
-      const match = queueData.find((r) => r.id === reportId) ?? null;
-      setReport(match);
+  const loadCase = useCallback(
+    async (force = false) => {
+      if (!userId || !isStaff) return;
 
-      if (match) {
-        setStudent(studentsData.find((s) => s.id === match.student_id) ?? null);
-        setBadge(badgesData.find((b) => b.id === match.badge_id) ?? null);
-        const allowed = getAllowedReviewTransitions(match.status);
-        setSelectedTransition(allowed[0] ?? "");
+      const cached = getCachedData<MalpracticeDetailCache>(userId, cacheKey);
+      if (cached && !force) {
+        applyDetail(cached.data);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
       }
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [reportId, profile]);
+
+      setError(null);
+      try {
+        const result = await fetchWithUserCache<MalpracticeDetailCache>(
+          userId,
+          cacheKey,
+          async () => {
+            const [queueData, studentsData, badgesData] = await Promise.all([
+              fetchMalpracticeQueue(),
+              fetchStaffStudentsRoster().catch(() => [] as StudentRosterItem[]),
+              fetchBadgesCatalog().catch(() => [] as BadgeSummary[]),
+            ]);
+            const match = queueData.find((r) => r.id === reportId) ?? null;
+            return {
+              report: match,
+              student: match
+                ? studentsData.find((s) => s.id === match.student_id) ?? null
+                : null,
+              badge: match
+                ? badgesData.find((b) => b.id === match.badge_id) ?? null
+                : null,
+            };
+          },
+          { force }
+        );
+        applyDetail(result);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyDetail, cacheKey, isStaff, reportId, userId]
+  );
 
   useEffect(() => {
-    void loadCase();
+    void loadCase(false);
   }, [loadCase]);
 
   const handleConfirmAction = async () => {
@@ -132,7 +191,8 @@ export function OperationsMalpracticeDetailView({
           title: "Case status updated",
           description: `Investigation transitioned to ${updated.status}.`,
         });
-        await loadCase();
+        if (userId) invalidateUserCache(userId, "ops:");
+        await loadCase(true);
       } else if (activeDialog.type === "nullify") {
         const award = await nullifyBadgeAward(report.id, { idempotencyKey });
         setLastAwardUpdate(award);
@@ -143,7 +203,8 @@ export function OperationsMalpracticeDetailView({
           title: "Badge award nullified",
           description: `Badge Award ${award.id.slice(0, 8)}… is now NULLIFIED.`,
         });
-        await loadCase();
+        if (userId) invalidateUserCache(userId, "ops:");
+        await loadCase(true);
       } else if (activeDialog.type === "reinstate") {
         const award = await reinstateBadgeAward(report.id, {
           reason: reinstateReason.trim(),
@@ -159,7 +220,8 @@ export function OperationsMalpracticeDetailView({
           title: "Badge award reinstated",
           description: `Badge Award ${award.id.slice(0, 8)}… restored and case marked REINSTATED.`,
         });
-        await loadCase();
+        if (userId) invalidateUserCache(userId, "ops:");
+        await loadCase(true);
       }
     } catch (err) {
       setActiveDialog(null);
@@ -173,9 +235,9 @@ export function OperationsMalpracticeDetailView({
     ? getAllowedReviewTransitions(report.status)
     : [];
   const isSelfReporter =
-    Boolean(profile?.id) &&
+    Boolean(userId) &&
     Boolean(report?.reported_by) &&
-    profile?.id === report?.reported_by;
+    userId === report?.reported_by;
 
   return (
     <AppShell
@@ -199,7 +261,7 @@ export function OperationsMalpracticeDetailView({
       {loading ? (
         <SectionSkeleton rows={6} />
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadCase} />
+        <ErrorBanner message={error} onRetry={() => void loadCase(true)} />
       ) : !report ? (
         <EmptyState
           title="Malpractice case not found"
@@ -207,7 +269,7 @@ export function OperationsMalpracticeDetailView({
           action={
             <Link
               href="/operations/malpractice"
-              className="inline-flex items-center rounded-md bg-[var(--accent-primary)] px-4 py-2 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+              className="inline-flex items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)]"
             >
               Back to Malpractice Queue
             </Link>
@@ -249,7 +311,7 @@ export function OperationsMalpracticeDetailView({
             <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6 lg:col-span-5">
               <div className="flex items-center justify-between border-b border-[var(--border-hairline)] pb-4">
                 <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                  Case Evidence & Metadata
+                  Case Evidence &amp; Metadata
                 </h2>
                 {(() => {
                   const meta = getMalpracticeStatusMeta(report.status);
@@ -301,7 +363,7 @@ export function OperationsMalpracticeDetailView({
                   <dt className="text-xs text-[var(--text-secondary)]">
                     Reported By (User UUID)
                   </dt>
-                  <dd className="mt-0.5 font-mono text-xs text-[var(--text-secondary)]">
+                  <dd className="mt-0.5 break-all font-mono text-xs text-[var(--text-secondary)]">
                     {report.reported_by}
                   </dd>
                 </div>
@@ -329,7 +391,7 @@ export function OperationsMalpracticeDetailView({
               {/* 1. Investigation Review Transitions */}
               <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
                 <h2 className="border-b border-[var(--border-hairline)] pb-3 text-base font-semibold text-[var(--text-primary)]">
-                  1. Investigation Status Transition
+                  01. Investigation Status Transition
                 </h2>
 
                 {isSelfReporter ? (
@@ -374,7 +436,7 @@ export function OperationsMalpracticeDetailView({
                           setIdempotencyKey(generateUuid());
                         }}
                         disabled={isSelfReporter}
-                        className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none disabled:opacity-50"
+                        className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none disabled:opacity-50"
                       >
                         {allowedTransitions.map((status) => (
                           <option key={status} value={status}>
@@ -401,7 +463,7 @@ export function OperationsMalpracticeDetailView({
                         }}
                         disabled={isSelfReporter}
                         placeholder="Record review rationale for the audit log..."
-                        className="mt-1.5 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-3 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none disabled:opacity-50"
+                        className="mt-1.5 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none disabled:opacity-50"
                       />
                     </div>
 
@@ -416,7 +478,7 @@ export function OperationsMalpracticeDetailView({
                             toStatus: selectedTransition,
                           });
                         }}
-                        className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] disabled:opacity-50"
+                        className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] disabled:opacity-50"
                       >
                         Transition Investigation Status
                       </button>
@@ -433,7 +495,7 @@ export function OperationsMalpracticeDetailView({
                     aria-hidden="true"
                   />
                   <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                    2. Badge Award Nullification
+                    02. Badge Award Nullification
                   </h2>
                 </div>
                 <p className="mt-3 text-xs leading-relaxed text-[var(--text-secondary)]">
@@ -454,7 +516,7 @@ export function OperationsMalpracticeDetailView({
                       setIdempotencyKey(generateUuid());
                       setActiveDialog({ type: "nullify" });
                     }}
-                    className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--status-error)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-40"
+                    className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--status-error)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                   >
                     Nullify Awarded Badge
                   </button>
@@ -469,7 +531,7 @@ export function OperationsMalpracticeDetailView({
                     aria-hidden="true"
                   />
                   <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                    3. Appeal Reinstatement
+                    03. Appeal Reinstatement
                   </h2>
                 </div>
                 <p className="mt-3 text-xs leading-relaxed text-[var(--text-secondary)]">
@@ -495,7 +557,7 @@ export function OperationsMalpracticeDetailView({
                       }}
                       disabled={!canReinstateCase(report.status)}
                       placeholder="Document appeal findings and approval rationale..."
-                      className="mt-1.5 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-2.5 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none disabled:opacity-50"
+                      className="mt-1.5 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none disabled:opacity-50"
                     />
                     {reinstateError ? (
                       <p className="mt-1 text-xs text-[var(--status-error)]">
@@ -525,7 +587,7 @@ export function OperationsMalpracticeDetailView({
                         setIdempotencyKey(generateUuid());
                         setActiveDialog({ type: "reinstate" });
                       }}
-                      className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] disabled:opacity-40"
+                      className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] disabled:opacity-40"
                     >
                       Reinstate Badge Award
                     </button>

@@ -33,6 +33,11 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+  invalidateUserCache,
+} from "@frontend/services/dataCache";
+import {
   bookStudentInterview,
   fetchBadgeEligibility,
   fetchBadgesCatalog,
@@ -77,25 +82,45 @@ export function StudentBookingView() {
   const { profile } = useAuth();
   const { pushToast } = useToast();
 
+  const userId = profile?.id ?? null;
+  const isAuthorized = Boolean(
+    profile && hasAllowedRole(profile.roles, ["STUDENT"])
+  );
+
   const initialBadgeId = searchParams.get("badgeId") ?? "";
 
-  const [badges, setBadges] = useState<BadgeSummary[]>([]);
-  const [loadingBadges, setLoadingBadges] = useState(true);
+  const [badges, setBadges] = useState<BadgeSummary[]>(() =>
+    userId
+      ? (getCachedData<BadgeSummary[]>(userId, "student:badges-catalog")?.data ??
+          [])
+      : []
+  );
+  const [loadingBadges, setLoadingBadges] = useState<boolean>(() =>
+    userId
+      ? !getCachedData<BadgeSummary[]>(userId, "student:badges-catalog")
+      : true
+  );
   const [badgeId, setBadgeId] = useState(initialBadgeId);
 
-  const [eligibility, setEligibility] = useState<EligibilityDecision | null>(null);
+  const [eligibility, setEligibility] = useState<EligibilityDecision | null>(
+    null
+  );
   const [checkingEligibility, setCheckingEligibility] = useState(false);
   const [eligibilityError, setEligibilityError] = useState<string | null>(null);
 
-  const [interviewers, setInterviewers] = useState<BookableInterviewerSummary[]>([]);
+  const [interviewers, setInterviewers] = useState<
+    BookableInterviewerSummary[]
+  >([]);
   const [loadingInterviewers, setLoadingInterviewers] = useState(false);
-  const [selectedInterviewerId, setSelectedInterviewerId] = useState<string>("ALL");
+  const [selectedInterviewerId, setSelectedInterviewerId] =
+    useState<string>("ALL");
 
   const [durationMinutes, setDurationMinutes] = useState(45);
   const [timezone, setTimezone] = useState("Asia/Kolkata");
   const [rangeDays, setRangeDays] = useState(14);
 
-  const [slotsResponse, setSlotsResponse] = useState<SlotsDiscoveryResponse | null>(null);
+  const [slotsResponse, setSlotsResponse] =
+    useState<SlotsDiscoveryResponse | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<BookableSlot | null>(null);
@@ -103,28 +128,41 @@ export function StudentBookingView() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [bookedInterview, setBookedInterview] = useState<InterviewRecord | null>(null);
+  const [bookedInterview, setBookedInterview] =
+    useState<InterviewRecord | null>(null);
 
   const [idempotencyState, setIdempotencyState] = useState<{
     signature: string;
     key: string;
   }>({ signature: "", key: "" });
 
-  const isAuthorized = Boolean(
-    profile && hasAllowedRole(profile.roles, ["STUDENT"])
-  );
-
   useEffect(() => {
-    if (!isAuthorized) return;
+    if (!userId || !isAuthorized) return;
     let active = true;
-    setLoadingBadges(true);
-    fetchBadgesCatalog()
+
+    const cached = getCachedData<BadgeSummary[]>(
+      userId,
+      "student:badges-catalog"
+    );
+    if (cached) {
+      const activeList = cached.data.filter((b) => b.is_active);
+      setBadges(activeList);
+      setLoadingBadges(false);
+      if (!initialBadgeId && activeList.length > 0 && !badgeId) {
+        setBadgeId(activeList[0].id);
+      }
+      if (!cached.isStale) return;
+    } else {
+      setLoadingBadges(true);
+    }
+
+    fetchWithUserCache(userId, "student:badges-catalog", fetchBadgesCatalog)
       .then((list) => {
         if (!active) return;
         const activeList = list.filter((b) => b.is_active);
         setBadges(activeList);
         if (!initialBadgeId && activeList.length > 0) {
-          setBadgeId(activeList[0].id);
+          setBadgeId((prev) => prev || activeList[0].id);
         }
       })
       .catch(() => {
@@ -136,32 +174,60 @@ export function StudentBookingView() {
     return () => {
       active = false;
     };
-  }, [initialBadgeId, isAuthorized]);
+  }, [badgeId, initialBadgeId, isAuthorized, userId]);
 
-  const loadEligibilityAndDirectory = useCallback(async (targetBadgeId: string) => {
-    if (!isAuthorized || !isValidUuid(targetBadgeId)) {
-      setEligibility(null);
-      setInterviewers([]);
-      return;
-    }
-    setCheckingEligibility(true);
-    setLoadingInterviewers(true);
-    setEligibilityError(null);
-    try {
-      const [elig, dir] = await Promise.all([
-        fetchBadgeEligibility(targetBadgeId),
-        fetchBookableInterviewers(targetBadgeId),
-      ]);
-      setEligibility(elig);
-      setInterviewers(dir);
-    } catch (err) {
-      setEligibility(null);
-      setEligibilityError(formatApiErrorMessage(err));
-    } finally {
-      setCheckingEligibility(false);
-      setLoadingInterviewers(false);
-    }
-  }, [isAuthorized]);
+  const loadEligibilityAndDirectory = useCallback(
+    async (targetBadgeId: string) => {
+      if (!userId || !isAuthorized || !isValidUuid(targetBadgeId)) {
+        setEligibility(null);
+        setInterviewers([]);
+        return;
+      }
+
+      const cachedElig = getCachedData<EligibilityDecision>(
+        userId,
+        `student:elig:${targetBadgeId}`
+      );
+      const cachedDir = getCachedData<BookableInterviewerSummary[]>(
+        userId,
+        `student:dir:${targetBadgeId}`
+      );
+
+      if (cachedElig && cachedDir) {
+        setEligibility(cachedElig.data);
+        setInterviewers(cachedDir.data);
+        setCheckingEligibility(false);
+        setLoadingInterviewers(false);
+        if (!cachedElig.isStale && !cachedDir.isStale) return;
+      } else {
+        setCheckingEligibility(true);
+        setLoadingInterviewers(true);
+      }
+
+      setEligibilityError(null);
+      try {
+        const [elig, dir] = await Promise.all([
+          fetchWithUserCache(userId, `student:elig:${targetBadgeId}`, () =>
+            fetchBadgeEligibility(targetBadgeId)
+          ),
+          fetchWithUserCache(userId, `student:dir:${targetBadgeId}`, () =>
+            fetchBookableInterviewers(targetBadgeId)
+          ),
+        ]);
+        setEligibility(elig);
+        setInterviewers(dir);
+      } catch (err) {
+        if (!cachedElig) {
+          setEligibility(null);
+          setEligibilityError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setCheckingEligibility(false);
+        setLoadingInterviewers(false);
+      }
+    },
+    [isAuthorized, userId]
+  );
 
   useEffect(() => {
     setSelectedInterviewerId("ALL");
@@ -192,7 +258,8 @@ export function StudentBookingView() {
         prev &&
         res.slots.some(
           (s) =>
-            s.interviewerId === prev.interviewerId && s.startsAt === prev.startsAt
+            s.interviewerId === prev.interviewerId &&
+            s.startsAt === prev.startsAt
         )
           ? prev
           : null
@@ -252,6 +319,9 @@ export function StudentBookingView() {
         timezone,
         idempotencyKey: key,
       });
+      if (userId) {
+        invalidateUserCache(userId, "student:");
+      }
       setBookedInterview(created);
       setConfirmOpen(false);
       pushToast({
@@ -288,7 +358,7 @@ export function StudentBookingView() {
       {bookedInterview ? (
         <section
           aria-label="Booking confirmation"
-          className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6"
+          className="rounded-lg border border-[var(--status-success)]/30 bg-[var(--bg-surface)] p-6"
         >
           <div className="flex items-start gap-3">
             <CheckCircle2
@@ -339,14 +409,14 @@ export function StudentBookingView() {
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link
                   href={`/student/interviews/${bookedInterview.id}`}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                  className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
                 >
                   <span>View Interview Details</span>
                   <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </Link>
                 <Link
                   href="/student/interviews"
-                  className="inline-flex min-h-10 items-center rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                  className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
                 >
                   My Interviews
                 </Link>
@@ -364,9 +434,9 @@ export function StudentBookingView() {
 
             {/* Step 1: Badge Selection */}
             <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent-soft)] text-xs font-semibold text-[var(--accent-text)]">
-                  1
+              <div className="flex items-center gap-2.5">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] font-mono text-[11px] font-semibold text-[var(--accent-text)]">
+                  01
                 </span>
                 <h2 className="text-base font-semibold text-[var(--text-primary)]">
                   Select Target Badge
@@ -396,7 +466,7 @@ export function StudentBookingView() {
                         className={`rounded-md border p-4 text-left transition-colors ${
                           active
                             ? "border-[var(--accent-primary)] bg-[var(--accent-soft)]"
-                            : "border-[var(--border-hairline)] bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)]"
+                            : "border-[var(--border-hairline)] bg-[var(--bg-canvas)]/40 hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]"
                         }`}
                       >
                         <p className="text-sm font-semibold text-[var(--text-primary)]">
@@ -415,9 +485,9 @@ export function StudentBookingView() {
             {/* Step 2: Interviewer Directory */}
             <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent-soft)] text-xs font-semibold text-[var(--accent-text)]">
-                    2
+                <div className="flex items-center gap-2.5">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] font-mono text-[11px] font-semibold text-[var(--accent-text)]">
+                    02
                   </span>
                   <h2 className="text-base font-semibold text-[var(--text-primary)]">
                     Choose an Interviewer
@@ -429,7 +499,7 @@ export function StudentBookingView() {
                     setSelectedInterviewerId("ALL");
                     setSelectedSlot(null);
                   }}
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                     selectedInterviewerId === "ALL"
                       ? "bg-[var(--accent-primary)] text-white"
                       : "border border-[var(--border-hairline)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]"
@@ -453,7 +523,8 @@ export function StudentBookingView() {
               ) : (
                 <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                   {interviewers.map((inv) => {
-                    const selected = selectedInterviewerId === inv.interviewer_id;
+                    const selected =
+                      selectedInterviewerId === inv.interviewer_id;
                     return (
                       <button
                         key={inv.interviewer_id}
@@ -465,7 +536,7 @@ export function StudentBookingView() {
                         className={`flex flex-col justify-between rounded-md border p-4 text-left transition-colors ${
                           selected
                             ? "border-[var(--accent-primary)] bg-[var(--accent-soft)]"
-                            : "border-[var(--border-hairline)] bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)]"
+                            : "border-[var(--border-hairline)] bg-[var(--bg-canvas)]/40 hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]"
                         }`}
                       >
                         <div>
@@ -495,7 +566,7 @@ export function StudentBookingView() {
                           ) : null}
 
                           {inv.expertise_tags.length > 0 ? (
-                            <p className="mt-2 text-xs font-medium text-[var(--text-muted)]">
+                            <p className="mt-2 font-mono text-[11px] text-[var(--text-muted)]">
                               {inv.expertise_tags.join(" · ")}
                             </p>
                           ) : null}
@@ -503,7 +574,7 @@ export function StudentBookingView() {
 
                         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-hairline)] pt-2.5 text-xs text-[var(--text-secondary)]">
                           <span>{inv.default_timezone}</span>
-                          <span>
+                          <span className="tabular-nums">
                             {inv.availability_summary.length > 0
                               ? inv.availability_summary
                                   .slice(0, 2)
@@ -525,9 +596,9 @@ export function StudentBookingView() {
             {/* Step 3: Available Time Slots */}
             <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent-soft)] text-xs font-semibold text-[var(--accent-text)]">
-                    3
+                <div className="flex items-center gap-2.5">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] font-mono text-[11px] font-semibold text-[var(--accent-text)]">
+                    03
                   </span>
                   <h2 className="text-base font-semibold text-[var(--text-primary)]">
                     Pick an Available Time Slot
@@ -542,7 +613,7 @@ export function StudentBookingView() {
                       setDurationMinutes(Number(e.target.value));
                       setSelectedSlot(null);
                     }}
-                    className="min-h-9 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
+                    className="min-h-9 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-canvas)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
                   >
                     <option value={30}>30 min</option>
                     <option value={45}>45 min</option>
@@ -553,7 +624,7 @@ export function StudentBookingView() {
                     aria-label="Booking lookahead window"
                     value={rangeDays}
                     onChange={(e) => setRangeDays(Number(e.target.value))}
-                    className="min-h-9 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
+                    className="min-h-9 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-canvas)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
                   >
                     <option value={7}>Next 7 days</option>
                     <option value={14}>Next 14 days</option>
@@ -564,7 +635,7 @@ export function StudentBookingView() {
                     aria-label="Display timezone"
                     value={timezone}
                     onChange={(e) => setTimezone(e.target.value)}
-                    className="min-h-9 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
+                    className="min-h-9 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-canvas)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
                   >
                     {COMMON_TIMEZONES.map((tz) => (
                       <option key={tz} value={tz}>
@@ -577,7 +648,7 @@ export function StudentBookingView() {
                     type="button"
                     onClick={() => void loadSlots()}
                     aria-label="Refresh available slots"
-                    className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[var(--border-hairline)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                    className="inline-flex min-h-9 items-center gap-1 whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
                   >
                     <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                     <span>Refresh</span>
@@ -588,7 +659,7 @@ export function StudentBookingView() {
               {slotsResponse?.studentState.hasActiveBooking ? (
                 <div
                   role="alert"
-                  className="mt-4 rounded-md border border-[var(--border-hairline)] bg-[var(--status-warning-bg)] p-4 text-xs text-[var(--text-primary)]"
+                  className="mt-4 rounded-md border border-[var(--status-warning)]/30 bg-[var(--status-warning-bg)] p-4 text-xs text-[var(--text-primary)]"
                 >
                   You already have an active interview booking for this badge.{" "}
                   {slotsResponse.studentState.activeBookingId ? (
@@ -604,10 +675,13 @@ export function StudentBookingView() {
 
               {slotsResponse?.studentState.retakeAfter &&
               new Date(slotsResponse.studentState.retakeAfter) > new Date() ? (
-                <div className="mt-4 rounded-md border border-[var(--border-hairline)] bg-[var(--status-warning-bg)] p-3 text-xs text-[var(--text-primary)]">
+                <div className="mt-4 rounded-md border border-[var(--status-warning)]/30 bg-[var(--status-warning-bg)] p-3 text-xs text-[var(--text-primary)]">
                   Retake cooldown active: available slots are filtered after{" "}
                   <span className="font-medium tabular-nums">
-                    {formatTimestamp(slotsResponse.studentState.retakeAfter, timezone)}
+                    {formatTimestamp(
+                      slotsResponse.studentState.retakeAfter,
+                      timezone
+                    )}
                   </span>
                   .
                 </div>
@@ -640,15 +714,16 @@ export function StudentBookingView() {
                         <h3 className="text-xs font-semibold text-[var(--text-primary)]">
                           {group.dateLabel}
                         </h3>
-                        <span className="text-xs text-[var(--text-muted)]">
-                          ({group.slots.length} open)
+                        <span className="font-mono text-[11px] tabular-nums text-[var(--text-muted)]">
+                          {group.slots.length} open
                         </span>
                       </div>
 
                       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
                         {group.slots.map((slot) => {
                           const isSelected =
-                            selectedSlot?.interviewerId === slot.interviewerId &&
+                            selectedSlot?.interviewerId ===
+                              slot.interviewerId &&
                             selectedSlot?.startsAt === slot.startsAt;
                           return (
                             <button
@@ -658,7 +733,7 @@ export function StudentBookingView() {
                               className={`rounded-md border p-3 text-left transition-colors ${
                                 isSelected
                                   ? "border-[var(--accent-primary)] bg-[var(--accent-soft)]"
-                                  : "border-[var(--border-hairline)] bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)]"
+                                  : "border-[var(--border-hairline)] bg-[var(--bg-canvas)]/40 hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]"
                               }`}
                             >
                               <p className="text-xs font-semibold tabular-nums text-[var(--text-primary)]">
@@ -698,7 +773,9 @@ export function StudentBookingView() {
                   <div className="space-y-2">
                     <StatusText
                       label={
-                        eligibility.eligible ? "Eligible to book" : "Not eligible"
+                        eligibility.eligible
+                          ? "Eligible to book"
+                          : "Not eligible"
                       }
                       tone={eligibility.eligible ? "success" : "error"}
                     />
@@ -767,9 +844,9 @@ export function StudentBookingView() {
                   type="button"
                   disabled={!canBook}
                   onClick={() => setConfirmOpen(true)}
-                  className="inline-flex min-h-10 w-full items-center justify-center rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex min-h-10 w-full items-center justify-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Review & Confirm Booking
+                  Review &amp; Confirm Booking
                 </button>
               </div>
             </div>

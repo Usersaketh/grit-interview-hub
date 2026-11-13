@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { motion } from "motion/react";
 import { X } from "lucide-react";
 
 interface ConfirmDialogProps {
@@ -43,7 +44,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
       role="presentation"
       onClick={(event) => {
         if (event.target === event.currentTarget && !busy) {
@@ -51,12 +52,15 @@ export function ConfirmDialog({
         }
       }}
     >
-      <div
+      <motion.div
+        initial={{ opacity: 0, scale: 0.98, y: 6 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.16, ease: "easeOut" }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-desc"
-        className="w-full max-w-md rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6 shadow-xl"
+        className="w-full max-w-md rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] p-6 shadow-[var(--shadow-elevated)]"
       >
         <div className="flex items-start justify-between gap-4">
           <h2
@@ -107,7 +111,7 @@ export function ConfirmDialog({
             {busy ? "Processing..." : confirmLabel}
           </button>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

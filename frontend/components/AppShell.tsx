@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { motion } from "motion/react";
 import {
   Award,
   Calendar,
   CalendarClock,
-  ClipboardCheck,
   FileText,
   History,
   LayoutDashboard,
@@ -16,12 +16,15 @@ import {
   Menu,
   ShieldAlert,
   ShieldCheck,
+  Terminal,
   Users,
   X,
 } from "lucide-react";
 import { useAuth } from "@frontend/hooks/useAuth";
+import { useToast } from "@frontend/hooks/useToast";
 import { ThemeSwitch } from "@frontend/components/ThemeSwitch";
 import { SectionSkeleton } from "@frontend/components/SurfaceStates";
+import { resolvePortalRedirect } from "@frontend/lib/domain";
 import type { AppRole } from "@frontend/types/api";
 
 interface NavItem {
@@ -85,11 +88,13 @@ export function AppShell({
   sectionLabel,
   children,
 }: AppShellProps) {
-  const pathname = usePathname();
+  const pathname = usePathname() || "/";
   const router = useRouter();
   const { profile, loading, error, signOut, refreshProfile } = useAuth();
+  const { pushToast } = useToast();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const lastRedirectKeyRef = useRef<string | null>(null);
 
   const visibleSections = profile
     ? NAV_SECTIONS.filter((section) =>
@@ -102,11 +107,57 @@ export function AppShell({
     (profile !== null &&
       allowedRoles.some((role) => profile.roles.includes(role)));
 
+  useEffect(() => {
+    if (!allowedRoles || loading || error) return;
+
+    const search =
+      typeof window !== "undefined" ? window.location.search : "";
+    const decision = resolvePortalRedirect({
+      pathname,
+      search,
+      profile,
+      loading,
+    });
+
+    if (!decision) {
+      lastRedirectKeyRef.current = null;
+      return;
+    }
+
+    const key = `${pathname}|${decision.reason}|${decision.target}`;
+    if (lastRedirectKeyRef.current === key) return;
+    lastRedirectKeyRef.current = key;
+
+    if (decision.toastTitle) {
+      pushToast({
+        title: decision.toastTitle,
+        description: decision.toastDescription,
+        tone: "warning",
+      });
+    }
+
+    router.replace(decision.target);
+  }, [allowedRoles, loading, error, pathname, profile, pushToast, router]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileMenuOpen]);
+
   const handleSignOut = async () => {
     setSigningOut(true);
     try {
       await signOut();
-      router.push("/login");
+      pushToast({
+        title: "Signed out",
+        description: "Your session has been cleared.",
+        tone: "info",
+      });
+      router.replace("/");
     } finally {
       setSigningOut(false);
     }
@@ -116,10 +167,10 @@ export function AppShell({
     <div className="space-y-6">
       {visibleSections.map((section) => (
         <div key={section.title}>
-          <p className="mb-2 px-3 text-xs font-semibold text-[var(--text-muted)]">
+          <p className="mb-2 px-3 font-mono text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">
             {section.title}
           </p>
-          <ul className="space-y-1">
+          <ul className="space-y-0.5">
             {section.items.map((item) => {
               const Icon = item.icon;
               const isRoot =
@@ -134,13 +185,20 @@ export function AppShell({
                   <Link
                     href={item.href}
                     onClick={onNavigate}
-                    className={`flex min-h-10 items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] ${
+                    className={`group flex min-h-9 items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] ${
                       active
-                        ? "bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                        ? "bg-[var(--accent-soft)] text-[var(--accent-text)] shadow-[inset_2px_0_0_var(--accent-primary)]"
                         : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
                     }`}
                   >
-                    <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <Icon
+                      className={`h-4 w-4 shrink-0 transition-colors ${
+                        active
+                          ? "text-[var(--accent-primary)]"
+                          : "text-[var(--text-muted)] group-hover:text-[var(--text-primary)]"
+                      }`}
+                      aria-hidden="true"
+                    />
                     <span className="truncate">{item.label}</span>
                   </Link>
                 </li>
@@ -152,23 +210,35 @@ export function AppShell({
     </div>
   );
 
+  const showRedirectingPlaceholder =
+    Boolean(allowedRoles) && !loading && !error && (!profile || !hasAccess);
+
   return (
     <div className="flex min-h-screen bg-[var(--bg-canvas)] text-[var(--text-primary)]">
       {/* Desktop persistent sidebar */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-[var(--border-hairline)] bg-[var(--bg-surface)] lg:flex">
-        <div className="flex h-14 items-center border-b border-[var(--border-hairline)] px-5">
+        <div className="flex h-14 items-center justify-between border-b border-[var(--border-hairline)] px-5">
           <Link
             href="/"
-            className="whitespace-nowrap text-base font-semibold tracking-tight text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
+            className="flex items-center gap-2.5 whitespace-nowrap text-sm font-semibold tracking-tight text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
           >
-            GRIT Interview Hub
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--accent-primary)]">
+              <Terminal className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+            <span>GRIT Hub</span>
           </Link>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+            v2
+          </span>
         </div>
 
-        <nav aria-label="Primary navigation" className="flex-1 overflow-y-auto px-3 py-5">
+        <nav
+          aria-label="Primary navigation"
+          className="flex-1 overflow-y-auto px-3 py-5"
+        >
           {loading ? (
             <div className="space-y-2 px-3">
-              <div className="h-4 w-28 rounded bg-[var(--bg-elevated)]" />
+              <div className="h-3.5 w-24 rounded bg-[var(--bg-elevated)]" />
               <div className="h-8 w-full rounded bg-[var(--bg-elevated)]" />
               <div className="h-8 w-full rounded bg-[var(--bg-elevated)]" />
               <div className="h-8 w-full rounded bg-[var(--bg-elevated)]" />
@@ -176,22 +246,24 @@ export function AppShell({
           ) : visibleSections.length > 0 ? (
             renderNavLinks()
           ) : (
-            <div className="px-3 text-xs leading-relaxed text-[var(--text-secondary)]">
-              Sign in with an authorized GRIT account to access portal navigation.
+            <div className="rounded-md border border-[var(--border-hairline)] bg-[var(--bg-canvas)]/60 p-3 text-xs leading-relaxed text-[var(--text-secondary)]">
+              Sign in with an authorized GRIT account to unlock portal navigation.
             </div>
           )}
         </nav>
 
         {profile ? (
-          <div className="border-t border-[var(--border-hairline)] p-4">
-            <p className="truncate text-sm font-medium text-[var(--text-primary)]">
-              {profile.full_name}
-            </p>
-            <p className="truncate text-xs text-[var(--text-secondary)]">
+          <div className="border-t border-[var(--border-hairline)] bg-[var(--bg-canvas)]/40 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="truncate text-xs font-semibold text-[var(--text-primary)]">
+                {profile.full_name}
+              </p>
+              <span className="shrink-0 rounded border border-[var(--border-hairline)] bg-[var(--bg-elevated)] px-1.5 py-0.5 font-mono text-[10px] uppercase text-[var(--accent-text)]">
+                {profile.roles[0] ?? "USER"}
+              </span>
+            </div>
+            <p className="mt-0.5 truncate font-mono text-[11px] text-[var(--text-muted)]">
               {profile.email}
-            </p>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              {profile.roles.join(" · ") || "No assigned role"}
             </p>
           </div>
         ) : null}
@@ -201,7 +273,7 @@ export function AppShell({
       {mobileMenuOpen ? (
         <div className="fixed inset-0 z-50 flex lg:hidden" role="presentation">
           <div
-            className="fixed inset-0 bg-black/45"
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs"
             onClick={() => setMobileMenuOpen(false)}
           />
           <aside className="relative z-10 flex w-72 max-w-[85vw] flex-col border-r border-[var(--border-hairline)] bg-[var(--bg-surface)]">
@@ -209,20 +281,26 @@ export function AppShell({
               <Link
                 href="/"
                 onClick={() => setMobileMenuOpen(false)}
-                className="whitespace-nowrap text-base font-semibold tracking-tight text-[var(--text-primary)]"
+                className="flex items-center gap-2 whitespace-nowrap text-sm font-semibold tracking-tight text-[var(--text-primary)]"
               >
-                GRIT Interview Hub
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--accent-primary)]">
+                  <Terminal className="h-3.5 w-3.5" aria-hidden="true" />
+                </span>
+                <span>GRIT Interview Hub</span>
               </Link>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}
                 aria-label="Close navigation menu"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
               >
-                <X className="h-5 w-5" aria-hidden="true" />
+                <X className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
-            <nav aria-label="Mobile navigation" className="flex-1 overflow-y-auto px-3 py-4">
+            <nav
+              aria-label="Mobile navigation"
+              className="flex-1 overflow-y-auto px-3 py-4"
+            >
               {renderNavLinks(() => setMobileMenuOpen(false))}
             </nav>
             {profile ? (
@@ -230,7 +308,7 @@ export function AppShell({
                 <p className="truncate text-sm font-medium text-[var(--text-primary)]">
                   {profile.full_name}
                 </p>
-                <p className="truncate text-xs text-[var(--text-secondary)]">
+                <p className="truncate font-mono text-[11px] text-[var(--text-secondary)]">
                   {profile.roles.join(" · ")}
                 </p>
               </div>
@@ -241,45 +319,49 @@ export function AppShell({
 
       {/* Main content area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-[var(--border-hairline)] bg-[var(--bg-surface)] px-4 sm:px-6 lg:px-8">
+        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-[var(--border-hairline)] bg-[var(--bg-glass)] px-4 backdrop-blur-md sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
               aria-label="Open navigation menu"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--border-hairline)] text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] lg:hidden"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border-hairline)] text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] lg:hidden"
             >
-              <Menu className="h-5 w-5" aria-hidden="true" />
+              <Menu className="h-4 w-4" aria-hidden="true" />
             </button>
             <Link
               href="/"
               className="whitespace-nowrap text-sm font-semibold text-[var(--text-primary)] lg:hidden"
             >
-              GRIT Interview Hub
+              GRIT Hub
             </Link>
             {sectionLabel ? (
-              <span className="hidden truncate text-xs font-medium text-[var(--text-secondary)] lg:inline">
+              <span className="hidden truncate font-mono text-xs text-[var(--text-secondary)] lg:inline">
                 {sectionLabel}
               </span>
             ) : null}
           </div>
 
-          <div className="flex shrink-0 items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2.5">
             <ThemeSwitch />
             {profile ? (
               <button
                 type="button"
                 onClick={handleSignOut}
                 disabled={signingOut}
-                className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
+                className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
               >
                 <LogOut className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span>{signingOut ? "Signing out" : "Sign out"}</span>
+                <span>{signingOut ? "Signing out..." : "Sign out"}</span>
               </button>
             ) : (
               <Link
-                href={`/login?next=${encodeURIComponent(pathname || "/")}`}
-                className="inline-flex min-h-9 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-3.5 py-1.5 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
+                href={
+                  pathname && pathname !== "/"
+                    ? `/login?next=${encodeURIComponent(pathname)}`
+                    : "/login"
+                }
+                className="inline-flex min-h-9 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
               >
                 Sign in
               </Link>
@@ -288,7 +370,7 @@ export function AppShell({
         </header>
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          {loading ? (
+          {loading || showRedirectingPlaceholder ? (
             <div className="space-y-4">
               <SectionSkeleton rows={3} />
               <SectionSkeleton rows={4} />
@@ -301,60 +383,30 @@ export function AppShell({
               <p className="mt-2 text-sm text-[var(--text-secondary)]">
                 {error}
               </p>
-              <button
-                type="button"
-                onClick={() => void refreshProfile()}
-                className="mt-4 inline-flex items-center rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
-              >
-                Retry Verification
-              </button>
-            </div>
-          ) : allowedRoles && !profile ? (
-            <div className="mx-auto max-w-lg rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
-              <div className="flex items-center gap-2 text-[var(--text-primary)]">
-                <ClipboardCheck className="h-5 w-5 text-[var(--accent-primary)]" aria-hidden="true" />
-                <h1 className="text-lg font-semibold">Authentication Required</h1>
-              </div>
-              <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-                You must sign in with an authorized GRIT Interview Hub account to
-                view this portal.
-              </p>
-              <div className="mt-5 flex flex-wrap gap-3">
-                <Link
-                  href={`/login?next=${encodeURIComponent(pathname || "/")}`}
-                  className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => void refreshProfile({ force: true })}
+                  className="inline-flex min-h-9 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
                 >
-                  Sign in to Continue
-                </Link>
+                  Retry Verification
+                </button>
                 <Link
-                  href="/"
-                  className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                  href="/login"
+                  className="inline-flex min-h-9 items-center whitespace-nowrap rounded-md border border-[var(--border-hairline)] px-4 py-2 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
                 >
-                  Return Home
-                </Link>
-              </div>
-            </div>
-          ) : allowedRoles && !hasAccess ? (
-            <div className="mx-auto max-w-lg rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
-              <h1 className="text-lg font-semibold text-[var(--text-primary)]">
-                Access Restricted
-              </h1>
-              <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-                Your account ({profile?.roles.join(", ") || "no role"}) does not
-                have permission to access this portal. Required role:{" "}
-                {allowedRoles.join(" or ")}.
-              </p>
-              <div className="mt-5">
-                <Link
-                  href="/"
-                  className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
-                >
-                  Go to Authorized Portal
+                  Go to Sign In
                 </Link>
               </div>
             </div>
           ) : (
-            children
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.16, ease: "easeOut" }}
+            >
+              {children}
+            </motion.div>
           )}
         </main>
       </div>

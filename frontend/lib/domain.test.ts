@@ -9,9 +9,14 @@ import {
   getAttendanceStatusMeta,
   getInterviewerLifecycleActions,
   getInvitationStatusMeta,
+  getRequiredRolesForPath,
+  getPortalDisplayName,
   groupBookableSlotsByDate,
   isValidUuid,
+  parseAuthCallbackParams,
   resolveDefaultPortalPath,
+  resolvePortalRedirect,
+  sanitizeNextPath,
   validateAvailabilityForm,
   validateBookingForm,
   validateBookingReasonForm,
@@ -244,3 +249,143 @@ test("groupBookableSlotsByDate groups slots chronologically in the chosen timezo
   assert.equal(grouped[0].dateKey, "2026-12-01");
   assert.equal(grouped[1].dateKey, "2026-12-02");
 });
+
+test("getRequiredRolesForPath, getPortalDisplayName, and sanitizeNextPath enforce portal routing boundaries", () => {
+  assert.deepEqual(getRequiredRolesForPath("/student"), ["STUDENT"]);
+  assert.deepEqual(getRequiredRolesForPath("/student/interviews"), ["STUDENT"]);
+  assert.deepEqual(getRequiredRolesForPath("/interviewer"), ["INTERVIEWER"]);
+  assert.deepEqual(getRequiredRolesForPath("/interviewer/schedule"), ["INTERVIEWER"]);
+  assert.deepEqual(getRequiredRolesForPath("/operations"), ["OPERATIONS", "ADMIN"]);
+  assert.deepEqual(getRequiredRolesForPath("/operations/audit"), ["OPERATIONS", "ADMIN"]);
+  assert.equal(getRequiredRolesForPath("/login"), null);
+  assert.equal(getRequiredRolesForPath("/"), null);
+
+  assert.equal(getPortalDisplayName("/student/badges"), "Student Portal");
+  assert.equal(getPortalDisplayName("/interviewer/history"), "Interviewer Portal");
+  assert.equal(getPortalDisplayName("/operations/students"), "Operations Portal");
+  assert.equal(getPortalDisplayName("/"), "Home");
+
+  assert.equal(sanitizeNextPath(null), null);
+  assert.equal(sanitizeNextPath("https://evil.example/steal"), null);
+  assert.equal(sanitizeNextPath("//evil.example/steal"), null);
+  assert.equal(sanitizeNextPath("/login"), null);
+  assert.equal(sanitizeNextPath("/signup?ref=1"), null);
+  assert.equal(sanitizeNextPath("/auth/callback?code=123"), null);
+  assert.equal(sanitizeNextPath("  /student/badges?tab=1  "), "/student/badges?tab=1");
+});
+
+test("resolvePortalRedirect handles loading, unauthenticated access, wrong-role redirects, and auth pages", () => {
+  assert.equal(
+    resolvePortalRedirect({
+      pathname: "/student",
+      profile: null,
+      loading: true,
+    }),
+    null
+  );
+
+  assert.deepEqual(
+    resolvePortalRedirect({
+      pathname: "/student/interviews",
+      search: "?filter=upcoming",
+      profile: null,
+      loading: false,
+    }),
+    {
+      target: "/login?next=%2Fstudent%2Finterviews%3Ffilter%3Dupcoming",
+      reason: "unauthenticated",
+    }
+  );
+
+  const studentToOps = resolvePortalRedirect({
+    pathname: "/operations",
+    profile: { roles: ["STUDENT"] },
+    loading: false,
+  });
+  assert.equal(studentToOps?.target, "/student");
+  assert.equal(studentToOps?.reason, "unauthorized_role");
+  assert.equal(Boolean(studentToOps?.toastTitle), true);
+
+  const interviewerToStudent = resolvePortalRedirect({
+    pathname: "/student",
+    profile: { roles: ["INTERVIEWER"] },
+    loading: false,
+  });
+  assert.equal(interviewerToStudent?.target, "/interviewer");
+  assert.equal(interviewerToStudent?.reason, "unauthorized_role");
+
+  assert.equal(
+    resolvePortalRedirect({
+      pathname: "/operations/audit",
+      profile: { roles: ["OPERATIONS"] },
+      loading: false,
+    }),
+    null
+  );
+
+  assert.deepEqual(
+    resolvePortalRedirect({
+      pathname: "/login",
+      nextParam: "/student/badges",
+      profile: { roles: ["STUDENT"] },
+      loading: false,
+    }),
+    {
+      target: "/student/badges",
+      reason: "authenticated_auth_page",
+    }
+  );
+
+  const loginForbiddenNext = resolvePortalRedirect({
+    pathname: "/login",
+    nextParam: "/operations",
+    profile: { roles: ["STUDENT"] },
+    loading: false,
+  });
+  assert.equal(loginForbiddenNext?.target, "/student");
+  assert.equal(loginForbiddenNext?.reason, "unauthorized_role");
+});
+
+test("parseAuthCallbackParams extracts PKCE code, token_hash, implicit session tokens, errors, and empty states", () => {
+  assert.deepEqual(parseAuthCallbackParams("?code=pkce-123&next=%2Fstudent"), {
+    kind: "code",
+    code: "pkce-123",
+    nextPath: "/student",
+  });
+
+  assert.deepEqual(
+    parseAuthCallbackParams("?token_hash=tok-456&type=signup&next=%2Fstudent%2Fbadges"),
+    {
+      kind: "token_hash",
+      tokenHash: "tok-456",
+      otpType: "signup",
+      nextPath: "/student/badges",
+    }
+  );
+
+  assert.deepEqual(
+    parseAuthCallbackParams("?next=%2Finterviewer", "#access_token=acc&refresh_token=ref"),
+    {
+      kind: "session_tokens",
+      accessToken: "acc",
+      refreshToken: "ref",
+      nextPath: "/interviewer",
+    }
+  );
+
+  const expiredError = parseAuthCallbackParams(
+    "?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired"
+  );
+  assert.equal(expiredError.kind, "error");
+  if (expiredError.kind === "error") {
+    assert.equal(expiredError.expired, true);
+    assert.equal(expiredError.errorCode, "otp_expired");
+    assert.equal(expiredError.message, "Email link is invalid or has expired");
+  }
+
+  assert.deepEqual(parseAuthCallbackParams("", ""), {
+    kind: "empty",
+    nextPath: null,
+  });
+});
+

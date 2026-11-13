@@ -22,6 +22,11 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+  invalidateUserCache,
+} from "@frontend/services/dataCache";
+import {
   approveBadgeCertification,
   fetchBadgeCertifications,
 } from "@frontend/services/hubApi";
@@ -41,13 +46,26 @@ const FILTER_TABS: Array<{ id: "ALL" | CertificationStatus; label: string }> = [
 export function OperationsCertificationsView() {
   const { profile } = useAuth();
   const { pushToast } = useToast();
+  const userId = profile?.id ?? null;
+  const isStaff = Boolean(
+    profile && hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])
+  );
 
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | CertificationStatus
   >("CERTIFICATION_PENDING");
   const [searchQuery, setSearchQuery] = useState("");
-  const [rows, setRows] = useState<BadgeCertificationQueueRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = `ops:certifications:${statusFilter}:${searchQuery.trim()}`;
+
+  const [rows, setRows] = useState<BadgeCertificationQueueRow[]>(() =>
+    userId
+      ? (getCachedData<BadgeCertificationQueueRow[]>(userId, cacheKey)?.data ??
+        [])
+      : []
+  );
+  const [loading, setLoading] = useState<boolean>(() =>
+    userId ? !getCachedData<BadgeCertificationQueueRow[]>(userId, cacheKey) : true
+  );
   const [error, setError] = useState<string | null>(null);
 
   const [approveTarget, setApproveTarget] =
@@ -55,27 +73,48 @@ export function OperationsCertificationsView() {
   const [approveIdemKey, setApproveIdemKey] = useState(() => generateUuid());
   const [approving, setApproving] = useState(false);
 
-  const loadQueue = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await fetchBadgeCertifications({
-        ...(statusFilter !== "ALL" ? { status: statusFilter } : {}),
-        ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
-      });
-      setRows(data);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile, searchQuery, statusFilter]);
+  const loadQueue = useCallback(
+    async (force = false) => {
+      if (!userId || !isStaff) return;
+
+      const cached = getCachedData<BadgeCertificationQueueRow[]>(
+        userId,
+        cacheKey
+      );
+      if (cached && !force) {
+        setRows(cached.data);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const data = await fetchWithUserCache(
+          userId,
+          cacheKey,
+          () =>
+            fetchBadgeCertifications({
+              ...(statusFilter !== "ALL" ? { status: statusFilter } : {}),
+              ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
+            }),
+          { force }
+        );
+        setRows(data);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [cacheKey, isStaff, searchQuery, statusFilter, userId]
+  );
 
   useEffect(() => {
-    void loadQueue();
+    void loadQueue(false);
   }, [loadQueue]);
 
   const handleConfirmApprove = async () => {
@@ -93,7 +132,8 @@ export function OperationsCertificationsView() {
         title: "Certification approved",
         description: `${approveTarget.student_name}'s ${approveTarget.badge_name} award transitioned to ${award.status}.`,
       });
-      await loadQueue();
+      if (userId) invalidateUserCache(userId, "ops:");
+      await loadQueue(true);
     } catch (err) {
       setApproveTarget(null);
       pushToast({
@@ -131,10 +171,10 @@ export function OperationsCertificationsView() {
                   key={tab.id}
                   type="button"
                   onClick={() => setStatusFilter(tab.id)}
-                  className={`min-h-9 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`min-h-9 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                     active
                       ? "bg-[var(--accent-primary)] text-white"
-                      : "border border-[var(--border-hairline)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                      : "border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   {tab.label}
@@ -155,14 +195,14 @@ export function OperationsCertificationsView() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search student, badge, booking..."
                 aria-label="Search certification queue"
-                className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)]"
+                className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
             </div>
 
             <button
               type="button"
-              onClick={() => void loadQueue()}
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border-hairline)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+              onClick={() => void loadQueue(true)}
+              className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
             >
               <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Refresh</span>
@@ -174,7 +214,7 @@ export function OperationsCertificationsView() {
         {loading ? (
           <SectionSkeleton rows={6} />
         ) : error ? (
-          <ErrorBanner message={error} onRetry={loadQueue} />
+          <ErrorBanner message={error} onRetry={() => void loadQueue(true)} />
         ) : rows.length === 0 ? (
           <EmptyState
             title="No certifications in this view"
@@ -191,7 +231,7 @@ export function OperationsCertificationsView() {
                 <thead>
                   <tr className="border-b border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-xs font-medium text-[var(--text-secondary)]">
                     <th className="px-4 py-3">Student</th>
-                    <th className="px-4 py-3">Badge & Track</th>
+                    <th className="px-4 py-3">Badge &amp; Track</th>
                     <th className="px-4 py-3">Evaluation</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3 text-right">Actions</th>
@@ -244,18 +284,24 @@ export function OperationsCertificationsView() {
                                   setApproveIdemKey(generateUuid());
                                   setApproveTarget(row);
                                 }}
-                                className="inline-flex items-center gap-1 rounded bg-[var(--accent-primary)] px-2.5 py-1.5 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                                className="inline-flex items-center gap-1 whitespace-nowrap rounded bg-[var(--accent-primary)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)]"
                               >
-                                <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                                <ShieldCheck
+                                  className="h-3.5 w-3.5"
+                                  aria-hidden="true"
+                                />
                                 <span>Approve</span>
                               </button>
                             ) : null}
                             <Link
                               href={`/operations/certifications/${row.id}`}
-                              className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-text)] hover:underline"
+                              className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                             >
                               <span>Inspect</span>
-                              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                              <ArrowRight
+                                className="h-3.5 w-3.5"
+                                aria-hidden="true"
+                              />
                             </Link>
                           </div>
                         </td>

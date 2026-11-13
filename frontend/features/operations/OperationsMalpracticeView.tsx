@@ -23,6 +23,11 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+  invalidateUserCache,
+} from "@frontend/services/dataCache";
+import {
   createMalpracticeReport,
   fetchBadgesCatalog,
   fetchMalpracticeQueue,
@@ -45,14 +50,36 @@ const STATUS_TABS: Array<{ id: "ALL" | MalpracticeStatus; label: string }> = [
   { id: "REINSTATED", label: "Reinstated" },
 ];
 
+interface OpsMalpracticeCache {
+  queue: MalpracticeQueueRow[];
+  students: StudentRosterItem[];
+  badges: BadgeSummary[];
+}
+
+const CACHE_KEY = "ops:malpractice";
+
 export function OperationsMalpracticeView() {
   const { profile } = useAuth();
   const { pushToast } = useToast();
+  const userId = profile?.id ?? null;
+  const isStaff = Boolean(
+    profile && hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])
+  );
 
-  const [queue, setQueue] = useState<MalpracticeQueueRow[]>([]);
-  const [students, setStudents] = useState<StudentRosterItem[]>([]);
-  const [badges, setBadges] = useState<BadgeSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialCached = userId
+    ? getCachedData<OpsMalpracticeCache>(userId, CACHE_KEY)?.data ?? null
+    : null;
+
+  const [queue, setQueue] = useState<MalpracticeQueueRow[]>(
+    () => initialCached?.queue ?? []
+  );
+  const [students, setStudents] = useState<StudentRosterItem[]>(
+    () => initialCached?.students ?? []
+  );
+  const [badges, setBadges] = useState<BadgeSummary[]>(
+    () => initialCached?.badges ?? []
+  );
+  const [loading, setLoading] = useState<boolean>(() => !initialCached);
   const [error, setError] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<"ALL" | MalpracticeStatus>(
@@ -75,30 +102,56 @@ export function OperationsMalpracticeView() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const loadQueue = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [queueData, studentsData, badgesData] = await Promise.all([
-        fetchMalpracticeQueue(),
-        fetchStaffStudentsRoster().catch(() => [] as StudentRosterItem[]),
-        fetchBadgesCatalog().catch(() => [] as BadgeSummary[]),
-      ]);
-      setQueue(queueData);
-      setStudents(studentsData);
-      setBadges(badgesData);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+  const loadQueue = useCallback(
+    async (force = false) => {
+      if (!userId || !isStaff) return;
+
+      const cached = getCachedData<OpsMalpracticeCache>(userId, CACHE_KEY);
+      if (cached && !force) {
+        setQueue(cached.data.queue);
+        setStudents(cached.data.students);
+        setBadges(cached.data.badges);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const result = await fetchWithUserCache<OpsMalpracticeCache>(
+          userId,
+          CACHE_KEY,
+          async () => {
+            const [queueData, studentsData, badgesData] = await Promise.all([
+              fetchMalpracticeQueue(),
+              fetchStaffStudentsRoster().catch(() => [] as StudentRosterItem[]),
+              fetchBadgesCatalog().catch(() => [] as BadgeSummary[]),
+            ]);
+            return {
+              queue: queueData,
+              students: studentsData,
+              badges: badgesData,
+            };
+          },
+          { force }
+        );
+        setQueue(result.queue);
+        setStudents(result.students);
+        setBadges(result.badges);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isStaff, userId]
+  );
 
   useEffect(() => {
-    void loadQueue();
+    void loadQueue(false);
   }, [loadQueue]);
 
   const studentMap = useMemo(
@@ -175,7 +228,8 @@ export function OperationsMalpracticeView() {
         title: "Malpractice report filed",
         description: `Case ${created.id.slice(0, 8)}… created in ${created.status} status.`,
       });
-      await loadQueue();
+      if (userId) invalidateUserCache(userId, "ops:");
+      await loadQueue(true);
     } catch (err) {
       setConfirmOpen(false);
       setCreateError(formatApiErrorMessage(err));
@@ -200,7 +254,7 @@ export function OperationsMalpracticeView() {
           <button
             type="button"
             onClick={() => setShowCreateForm((prev) => !prev)}
-            className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
+            className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
           >
             <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span>{showCreateForm ? "Close Report Form" : "File Report"}</span>
@@ -251,7 +305,7 @@ export function OperationsMalpracticeView() {
                     setStudentId(e.target.value);
                     setIdempotencyKey(generateUuid());
                   }}
-                  className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                  className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
                 >
                   <option value="">Select a student...</option>
                   {students.map((s) => (
@@ -271,7 +325,7 @@ export function OperationsMalpracticeView() {
                     setIdempotencyKey(generateUuid());
                   }}
                   placeholder="Student UUID"
-                  className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 font-mono text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                  className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 font-mono text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
                 />
               )}
               {fieldErrors.studentId ? (
@@ -296,7 +350,7 @@ export function OperationsMalpracticeView() {
                     setBadgeId(e.target.value);
                     setIdempotencyKey(generateUuid());
                   }}
-                  className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                  className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
                 >
                   <option value="">Select a badge...</option>
                   {badges.map((b) => (
@@ -315,7 +369,7 @@ export function OperationsMalpracticeView() {
                     setIdempotencyKey(generateUuid());
                   }}
                   placeholder="Badge UUID"
-                  className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 font-mono text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                  className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 font-mono text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
                 />
               )}
               {fieldErrors.badgeId ? (
@@ -341,7 +395,7 @@ export function OperationsMalpracticeView() {
                   setIdempotencyKey(generateUuid());
                 }}
                 placeholder="CODE_PLAGIARISM"
-                className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 font-mono text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 font-mono text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
               {fieldErrors.reasonCode ? (
                 <p className="mt-1 text-xs text-[var(--status-error)]">
@@ -366,7 +420,7 @@ export function OperationsMalpracticeView() {
                   setIdempotencyKey(generateUuid());
                 }}
                 placeholder="Session recording reference or incident ticket ID"
-                className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                className="mt-1.5 min-h-10 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
               {fieldErrors.evidenceReference ? (
                 <p className="mt-1 text-xs text-[var(--status-error)]">
@@ -391,7 +445,7 @@ export function OperationsMalpracticeView() {
                   setIdempotencyKey(generateUuid());
                 }}
                 placeholder="Document factual observations, timestamps, and verification findings..."
-                className="mt-1.5 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-3 text-sm text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                className="mt-1.5 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
               {fieldErrors.description ? (
                 <p className="mt-1 text-xs text-[var(--status-error)]">
@@ -404,16 +458,16 @@ export function OperationsMalpracticeView() {
               <button
                 type="button"
                 onClick={() => setShowCreateForm(false)}
-                className="inline-flex min-h-10 items-center rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={submitting}
-                className="inline-flex min-h-10 items-center rounded-md bg-[var(--accent-primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] disabled:opacity-60"
+                className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] disabled:opacity-60"
               >
-                Review & File Report
+                Review &amp; File Report
               </button>
             </div>
           </form>
@@ -431,7 +485,7 @@ export function OperationsMalpracticeView() {
               className={`min-h-8 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                 statusFilter === tab.id
                   ? "bg-[var(--accent-primary)] text-white"
-                  : "border border-[var(--border-hairline)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                  : "border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
               }`}
             >
               {tab.label}
@@ -450,7 +504,7 @@ export function OperationsMalpracticeView() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search reason, student, badge..."
             aria-label="Search malpractice cases"
-            className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none sm:w-60"
+            className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none sm:w-60"
           />
         </div>
       </div>
@@ -458,7 +512,7 @@ export function OperationsMalpracticeView() {
       {loading ? (
         <SectionSkeleton rows={5} />
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadQueue} />
+        <ErrorBanner message={error} onRetry={() => void loadQueue(true)} />
       ) : filtered.length === 0 ? (
         <EmptyState
           title="No malpractice cases match"
@@ -470,7 +524,7 @@ export function OperationsMalpracticeView() {
             <table className="w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-xs font-medium text-[var(--text-secondary)]">
-                  <th className="px-4 py-3">Reason & Case ID</th>
+                  <th className="px-4 py-3">Reason &amp; Case ID</th>
                   <th className="px-4 py-3">Student</th>
                   <th className="px-4 py-3">Badge</th>
                   <th className="px-4 py-3">Filed At</th>
@@ -524,7 +578,7 @@ export function OperationsMalpracticeView() {
                           href={`/operations/malpractice/${row.id}`}
                           className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                         >
-                          <span>Inspect & Act</span>
+                          <span>Inspect &amp; Act</span>
                           <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                         </Link>
                       </td>

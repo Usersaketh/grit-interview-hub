@@ -12,6 +12,10 @@ import {
 import { useAuth } from "@frontend/hooks/useAuth";
 import { formatTimestamp, hasAllowedRole } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
+import {
+  fetchWithUserCache,
+  getCachedData,
+} from "@frontend/services/dataCache";
 import { fetchAuditLogs } from "@frontend/services/hubApi";
 import type { AuditLogItem } from "@frontend/types/api";
 
@@ -27,46 +31,86 @@ const ENTITY_TYPES = [
   { value: "profile", label: "Profile / Signup" },
 ];
 
+interface AuditCache {
+  items: AuditLogItem[];
+  totalCount: number;
+}
+
 export function OperationsAuditView() {
   const { profile } = useAuth();
-
-  const [items, setItems] = useState<AuditLogItem[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const userId = profile?.id ?? null;
+  const isStaff = Boolean(
+    profile && hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])
+  );
 
   const [entityType, setEntityType] = useState("");
   const [actionFilter, setActionFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(0);
 
+  const cacheKey = `ops:audit:${entityType}:${actionFilter.trim().toUpperCase()}:${searchQuery.trim()}:${page}`;
+  const initialCached = userId
+    ? getCachedData<AuditCache>(userId, cacheKey)?.data ?? null
+    : null;
+
+  const [items, setItems] = useState<AuditLogItem[]>(
+    () => initialCached?.items ?? []
+  );
+  const [totalCount, setTotalCount] = useState<number>(
+    () => initialCached?.totalCount ?? 0
+  );
+  const [loading, setLoading] = useState<boolean>(() => !initialCached);
+  const [error, setError] = useState<string | null>(null);
   const [selectedDiff, setSelectedDiff] = useState<AuditLogItem | null>(null);
 
-  const loadAudit = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await fetchAuditLogs({
-        ...(entityType ? { entityType } : {}),
-        ...(actionFilter.trim() ? { action: actionFilter.trim().toUpperCase() } : {}),
-        ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
-        limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE,
-      });
-      setItems(data.items);
-      setTotalCount(data.totalCount);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [actionFilter, entityType, page, profile, searchQuery]);
+  const loadAudit = useCallback(
+    async (force = false) => {
+      if (!userId || !isStaff) return;
+
+      const cached = getCachedData<AuditCache>(userId, cacheKey);
+      if (cached && !force) {
+        setItems(cached.data.items);
+        setTotalCount(cached.data.totalCount);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const data = await fetchWithUserCache<AuditCache>(
+          userId,
+          cacheKey,
+          async () => {
+            const res = await fetchAuditLogs({
+              ...(entityType ? { entityType } : {}),
+              ...(actionFilter.trim()
+                ? { action: actionFilter.trim().toUpperCase() }
+                : {}),
+              ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
+              limit: PAGE_SIZE,
+              offset: page * PAGE_SIZE,
+            });
+            return { items: res.items, totalCount: res.totalCount };
+          },
+          { force }
+        );
+        setItems(data.items);
+        setTotalCount(data.totalCount);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [actionFilter, cacheKey, entityType, isStaff, page, searchQuery, userId]
+  );
 
   useEffect(() => {
-    void loadAudit();
+    void loadAudit(false);
   }, [loadAudit]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -96,7 +140,7 @@ export function OperationsAuditView() {
                 setEntityType(e.target.value);
                 setPage(0);
               }}
-              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-primary)]"
+              className="min-h-9 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
             >
               {ENTITY_TYPES.map((opt) => (
                 <option key={opt.value || "all"} value={opt.value}>
@@ -114,7 +158,7 @@ export function OperationsAuditView() {
               }}
               placeholder="Action (e.g. BOOKED, AWARDED)..."
               aria-label="Filter by action"
-              className="min-h-9 w-48 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-primary)]"
+              className="min-h-9 w-48 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
             />
           </div>
 
@@ -133,14 +177,14 @@ export function OperationsAuditView() {
                 }}
                 placeholder="Search actor, entity ID, reason..."
                 aria-label="Search audit events"
-                className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)]"
+                className="min-h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
               />
             </div>
 
             <button
               type="button"
-              onClick={() => void loadAudit()}
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border-hairline)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+              onClick={() => void loadAudit(true)}
+              className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
             >
               <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Refresh</span>
@@ -152,7 +196,7 @@ export function OperationsAuditView() {
         {loading ? (
           <SectionSkeleton rows={6} />
         ) : error ? (
-          <ErrorBanner message={error} onRetry={loadAudit} />
+          <ErrorBanner message={error} onRetry={() => void loadAudit(true)} />
         ) : items.length === 0 ? (
           <EmptyState
             title="No audit events matched"
@@ -166,7 +210,7 @@ export function OperationsAuditView() {
                   <tr className="border-b border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-xs font-medium text-[var(--text-secondary)]">
                     <th className="px-4 py-3">Timestamp</th>
                     <th className="px-4 py-3">Actor</th>
-                    <th className="px-4 py-3">Action & Entity</th>
+                    <th className="px-4 py-3">Action &amp; Entity</th>
                     <th className="px-4 py-3">Reason / Summary</th>
                     <th className="px-4 py-3 text-right">Payload</th>
                   </tr>
@@ -203,7 +247,7 @@ export function OperationsAuditView() {
                         <button
                           type="button"
                           onClick={() => setSelectedDiff(item)}
-                          className="inline-flex items-center gap-1 rounded border border-[var(--border-hairline)] px-2.5 py-1 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--bg-elevated)]"
+                          className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-2.5 py-1 text-xs font-medium text-[var(--accent-text)] transition-colors hover:bg-[var(--bg-subtle)]"
                         >
                           <Code2 className="h-3.5 w-3.5" aria-hidden="true" />
                           <span>Diff</span>
@@ -226,7 +270,7 @@ export function OperationsAuditView() {
                   type="button"
                   disabled={page === 0}
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  className="inline-flex items-center gap-1 rounded border border-[var(--border-hairline)] px-2.5 py-1 font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] disabled:opacity-40"
+                  className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-[var(--border-hairline)] bg-[var(--bg-elevated)] px-2.5 py-1 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)] disabled:opacity-40"
                 >
                   <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
                   <span>Previous</span>
@@ -238,7 +282,7 @@ export function OperationsAuditView() {
                   type="button"
                   disabled={page + 1 >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
-                  className="inline-flex items-center gap-1 rounded border border-[var(--border-hairline)] px-2.5 py-1 font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] disabled:opacity-40"
+                  className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-[var(--border-hairline)] bg-[var(--bg-elevated)] px-2.5 py-1 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)] disabled:opacity-40"
                 >
                   <span>Next</span>
                   <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -252,12 +296,12 @@ export function OperationsAuditView() {
       {/* JSON Diff Modal */}
       {selectedDiff ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="audit-diff-title"
         >
-          <div className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)]">
+          <div className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)]">
             <div className="flex items-center justify-between border-b border-[var(--border-hairline)] px-5 py-4">
               <div>
                 <h2
@@ -267,14 +311,15 @@ export function OperationsAuditView() {
                   {selectedDiff.entityType} · {selectedDiff.action}
                 </h2>
                 <p className="font-mono text-xs text-[var(--text-secondary)]">
-                  Entity {selectedDiff.entityId} · {formatTimestamp(selectedDiff.createdAt)}
+                  Entity {selectedDiff.entityId} ·{" "}
+                  {formatTimestamp(selectedDiff.createdAt)}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedDiff(null)}
                 aria-label="Close payload diff"
-                className="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]"
+                className="rounded p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>

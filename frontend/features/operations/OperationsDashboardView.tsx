@@ -10,6 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import { AppShell } from "@frontend/components/AppShell";
+import { GritProgressionTrack } from "@frontend/components/GritProgressionTrack";
 import { PageHeader } from "@frontend/components/PageHeader";
 import { StatusText } from "@frontend/components/StatusText";
 import {
@@ -26,6 +27,10 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+} from "@frontend/services/dataCache";
+import {
   fetchAdminDashboard,
   fetchInterviewerAvailability,
   fetchMalpracticeQueue,
@@ -40,58 +45,96 @@ import type {
   StudentRosterItem,
 } from "@frontend/types/api";
 
+interface OpsDashboardCache {
+  metrics: AdminDashboardMetrics;
+  malpracticeQueue: MalpracticeQueueRow[];
+  students: StudentRosterItem[];
+  interviews: InterviewRecord[];
+  availability: InterviewerAvailabilityRecord[];
+}
+
+const CACHE_KEY = "ops:dashboard";
+
 export function OperationsDashboardView() {
   const { profile } = useAuth();
-  const [metrics, setMetrics] = useState<AdminDashboardMetrics | null>(null);
-  const [malpracticeQueue, setMalpracticeQueue] = useState<MalpracticeQueueRow[]>(
-    []
+  const userId = profile?.id ?? null;
+  const isStaff = Boolean(
+    profile && hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])
   );
-  const [students, setStudents] = useState<StudentRosterItem[]>([]);
-  const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
-  const [availability, setAvailability] = useState<
-    InterviewerAvailabilityRecord[]
-  >([]);
-  const [loading, setLoading] = useState(true);
+
+  const [data, setData] = useState<OpsDashboardCache | null>(() =>
+    userId ? (getCachedData<OpsDashboardCache>(userId, CACHE_KEY)?.data ?? null) : null
+  );
+  const [loading, setLoading] = useState<boolean>(() =>
+    userId ? !getCachedData<OpsDashboardCache>(userId, CACHE_KEY) : true
+  );
   const [error, setError] = useState<string | null>(null);
 
-  const loadOverview = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [
-        dashboardData,
-        queueData,
-        studentsData,
-        interviewsData,
-        availData,
-      ] = await Promise.all([
-        fetchAdminDashboard(),
-        fetchMalpracticeQueue(),
-        fetchStaffStudentsRoster().catch(() => [] as StudentRosterItem[]),
-        fetchScopedInterviews().catch(() => [] as InterviewRecord[]),
-        fetchInterviewerAvailability().catch(
-          () => [] as InterviewerAvailabilityRecord[]
-        ),
-      ]);
+  const loadOverview = useCallback(
+    async (force = false) => {
+      if (!userId || !isStaff) return;
 
-      setMetrics(dashboardData);
-      setMalpracticeQueue(queueData);
-      setStudents(studentsData);
-      setInterviews(interviewsData);
-      setAvailability(availData);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
+      const cached = getCachedData<OpsDashboardCache>(userId, CACHE_KEY);
+      if (cached && !force) {
+        setData(cached.data);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const result = await fetchWithUserCache<OpsDashboardCache>(
+          userId,
+          CACHE_KEY,
+          async () => {
+            const [
+              dashboardData,
+              queueData,
+              studentsData,
+              interviewsData,
+              availData,
+            ] = await Promise.all([
+              fetchAdminDashboard(),
+              fetchMalpracticeQueue(),
+              fetchStaffStudentsRoster().catch(() => [] as StudentRosterItem[]),
+              fetchScopedInterviews().catch(() => [] as InterviewRecord[]),
+              fetchInterviewerAvailability().catch(
+                () => [] as InterviewerAvailabilityRecord[]
+              ),
+            ]);
+            return {
+              metrics: dashboardData,
+              malpracticeQueue: queueData,
+              students: studentsData,
+              interviews: interviewsData,
+              availability: availData,
+            };
+          },
+          { force }
+        );
+        setData(result);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isStaff, userId]
+  );
 
   useEffect(() => {
-    void loadOverview();
+    void loadOverview(false);
   }, [loadOverview]);
+
+  const metrics = data?.metrics ?? null;
+  const malpracticeQueue = useMemo(() => data?.malpracticeQueue ?? [], [data]);
+  const students = useMemo(() => data?.students ?? [], [data]);
+  const interviews = useMemo(() => data?.interviews ?? [], [data]);
+  const availability = useMemo(() => data?.availability ?? [], [data]);
 
   const activeMalpractice = useMemo(
     () =>
@@ -136,14 +179,14 @@ export function OperationsDashboardView() {
           <div className="flex flex-wrap items-center gap-2.5">
             <Link
               href="/operations/certifications"
-              className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+              className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
             >
               <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span>Approve Certification</span>
             </Link>
             <Link
               href="/operations/malpractice"
-              className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+              className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)]"
             >
               <ShieldAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span>Malpractice Queue</span>
@@ -158,9 +201,39 @@ export function OperationsDashboardView() {
           <SectionSkeleton rows={4} />
         </div>
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadOverview} />
+        <ErrorBanner message={error} onRetry={() => void loadOverview(true)} />
       ) : (
         <div className="space-y-6">
+          <GritProgressionTrack
+            title="Institution Assessment Pipeline"
+            compact
+            stages={{
+              preparation: {
+                state: students.length > 0 ? "completed" : "active",
+                detail: `${students.length} students`,
+              },
+              interview: {
+                state: statusBreakdown.booked > 0 ? "active" : "completed",
+                detail: `${statusBreakdown.booked} booked`,
+              },
+              evaluation: {
+                state:
+                  (metrics?.pendingEvaluations ?? 0) > 0
+                    ? "active"
+                    : "completed",
+                detail: `${metrics?.pendingEvaluations ?? 0} pending`,
+              },
+              certification: {
+                state:
+                  (metrics?.pendingCertifications ?? 0) > 0 ||
+                  activeMalpractice.length > 0
+                    ? "attention"
+                    : "completed",
+                detail: `${metrics?.pendingCertifications ?? 0} awaiting sign-off`,
+              },
+            }}
+          />
+
           {/* Primary KPI Strip */}
           <section
             aria-label="Operations metrics"
@@ -175,7 +248,7 @@ export function OperationsDashboardView() {
               </p>
               <Link
                 href="/operations/interviews"
-                className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-text)] hover:underline"
+                className="mt-2 inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
               >
                 <span>Inspect interviews</span>
                 <ArrowRight className="h-3 w-3" aria-hidden="true" />
@@ -203,7 +276,7 @@ export function OperationsDashboardView() {
               </p>
               <Link
                 href="/operations/certifications"
-                className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-text)] hover:underline"
+                className="mt-2 inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
               >
                 <span>Approval queue ({metrics?.evaluated ?? 0} evaluated)</span>
                 <ArrowRight className="h-3 w-3" aria-hidden="true" />
@@ -219,7 +292,7 @@ export function OperationsDashboardView() {
               </p>
               <Link
                 href="/operations/malpractice"
-                className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-text)] hover:underline"
+                className="mt-2 inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
               >
                 <span>{malpracticeQueue.length} total cases</span>
                 <ArrowRight className="h-3 w-3" aria-hidden="true" />
@@ -236,7 +309,7 @@ export function OperationsDashboardView() {
                 </h2>
                 <Link
                   href="/operations/interviews"
-                  className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                  className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                 >
                   All Interviews
                 </Link>
@@ -285,9 +358,9 @@ export function OperationsDashboardView() {
                             {item.count} ({pct}%)
                           </span>
                         </div>
-                        <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
+                        <div className="mt-1.5 h-2 w-full overflow-hidden rounded-sm bg-[var(--bg-elevated)]">
                           <div
-                            className={`h-full rounded-full ${item.color}`}
+                            className={`h-full rounded-sm ${item.color}`}
                             style={{ width: `${pct}%` }}
                           />
                         </div>
@@ -325,7 +398,7 @@ export function OperationsDashboardView() {
                     </span>
                     <Link
                       href="/operations/students"
-                      className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                      className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                     >
                       Roster
                     </Link>
@@ -353,7 +426,7 @@ export function OperationsDashboardView() {
                     </span>
                     <Link
                       href="/operations/availability"
-                      className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                      className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                     >
                       View
                     </Link>
@@ -371,13 +444,14 @@ export function OperationsDashboardView() {
                         Pending Interviewer Invitations
                       </p>
                       <p className="text-xs text-[var(--text-secondary)]">
-                        Invitation-only onboarding queue ({metrics?.pendingInvitations ?? 0} pending)
+                        Invitation-only onboarding queue (
+                        {metrics?.pendingInvitations ?? 0} pending)
                       </p>
                     </div>
                   </div>
                   <Link
                     href="/operations/invitations"
-                    className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                    className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                   >
                     Manage Invites
                   </Link>
@@ -394,7 +468,7 @@ export function OperationsDashboardView() {
               </h2>
               <Link
                 href="/operations/malpractice"
-                className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
               >
                 Manage All Cases
               </Link>
@@ -423,14 +497,17 @@ export function OperationsDashboardView() {
                           <span className="font-mono">
                             {row.student_id.slice(0, 8)}…
                           </span>{" "}
-                          · Filed {formatTimestamp(row.created_at)}
+                          · Filed{" "}
+                          <span className="tabular-nums">
+                            {formatTimestamp(row.created_at)}
+                          </span>
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
                         <StatusText label={meta.label} tone={meta.tone} />
                         <Link
                           href={`/operations/malpractice/${row.id}`}
-                          className="text-xs font-medium text-[var(--accent-text)] hover:underline"
+                          className="whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
                         >
                           Review
                         </Link>

@@ -4,6 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { CalendarClock, History, RefreshCw, XCircle } from "lucide-react";
 import { AppShell } from "@frontend/components/AppShell";
+import { ConfirmDialog } from "@frontend/components/ConfirmDialog";
+import {
+  GritProgressionTrack,
+  type ProgressionStageKey,
+} from "@frontend/components/GritProgressionTrack";
 import { PageHeader } from "@frontend/components/PageHeader";
 import { StatusText } from "@frontend/components/StatusText";
 import {
@@ -27,6 +32,11 @@ import {
 } from "@frontend/lib/domain";
 import { formatApiErrorMessage } from "@frontend/services/apiClient";
 import {
+  fetchWithUserCache,
+  getCachedData,
+  invalidateUserCache,
+} from "@frontend/services/dataCache";
+import {
   cancelStudentBooking,
   fetchBookableSlots,
   fetchStudentInterviewDetail,
@@ -36,8 +46,14 @@ import {
 import type {
   BookableSlot,
   InterviewWorkspaceDetail,
+  StudentMalpracticeStatusResponse,
   StudentMalpracticeStatusRow,
 } from "@frontend/types/api";
+
+interface DetailBundle {
+  workspaceDetail: InterviewWorkspaceDetail;
+  malpracticeStatus: StudentMalpracticeStatusResponse;
+}
 
 export function StudentInterviewDetailView({
   interviewId,
@@ -46,12 +62,37 @@ export function StudentInterviewDetailView({
 }) {
   const { profile } = useAuth();
   const { pushToast } = useToast();
+  const userId = profile?.id ?? null;
+  const isStudent = Boolean(
+    profile && hasAllowedRole(profile.roles, ["STUDENT"])
+  );
 
-  const [detail, setDetail] = useState<InterviewWorkspaceDetail | null>(null);
-  const [awardRow, setAwardRow] = useState<
-    Extract<StudentMalpracticeStatusRow, { recordType: "badge_award" }> | null
-  >(null);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = `student:interview-detail:${interviewId}`;
+  const cachedBundle = userId
+    ? (getCachedData<DetailBundle>(userId, cacheKey)?.data ?? null)
+    : null;
+
+  const [detail, setDetail] = useState<InterviewWorkspaceDetail | null>(
+    cachedBundle?.workspaceDetail ?? null
+  );
+  const [awardRow, setAwardRow] = useState<Extract<
+    StudentMalpracticeStatusRow,
+    { recordType: "badge_award" }
+  > | null>(() =>
+    cachedBundle
+      ? (cachedBundle.malpracticeStatus.records.find(
+          (
+            r
+          ): r is Extract<
+            StudentMalpracticeStatusRow,
+            { recordType: "badge_award" }
+          > =>
+            r.recordType === "badge_award" &&
+            r.badgeId === cachedBundle.workspaceDetail.interview.badge_id
+        ) ?? null)
+      : null
+  );
+  const [loading, setLoading] = useState<boolean>(!cachedBundle);
   const [error, setError] = useState<string | null>(null);
 
   // Cancellation state
@@ -75,38 +116,63 @@ export function StudentInterviewDetailView({
     generateUuid()
   );
 
-  const loadDetail = useCallback(async () => {
-    if (!profile || !hasAllowedRole(profile.roles, ["STUDENT"])) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [workspaceDetail, malpracticeStatus] = await Promise.all([
-        fetchStudentInterviewDetail(interviewId),
-        fetchStudentMalpracticeStatus(),
-      ]);
-      setDetail(workspaceDetail);
+  const applyBundle = useCallback((bundle: DetailBundle) => {
+    setDetail(bundle.workspaceDetail);
+    const award =
+      bundle.malpracticeStatus.records.find(
+        (
+          r
+        ): r is Extract<
+          StudentMalpracticeStatusRow,
+          { recordType: "badge_award" }
+        > =>
+          r.recordType === "badge_award" &&
+          r.badgeId === bundle.workspaceDetail.interview.badge_id
+      ) ?? null;
+    setAwardRow(award);
+  }, []);
 
-      const award =
-        malpracticeStatus.records.find(
-          (
-            r
-          ): r is Extract<
-            StudentMalpracticeStatusRow,
-            { recordType: "badge_award" }
-          > =>
-            r.recordType === "badge_award" &&
-            r.badgeId === workspaceDetail.interview.badge_id
-        ) ?? null;
-      setAwardRow(award);
-    } catch (err) {
-      setError(formatApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [interviewId, profile]);
+  const loadDetail = useCallback(
+    async (force = false) => {
+      if (!userId || !isStudent) return;
+
+      const cached = getCachedData<DetailBundle>(userId, cacheKey);
+      if (cached && !force) {
+        applyBundle(cached.data);
+        setLoading(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoading(true);
+      }
+
+      setError(null);
+      try {
+        const bundle = await fetchWithUserCache(
+          userId,
+          cacheKey,
+          async () => {
+            const [workspaceDetail, malpracticeStatus] = await Promise.all([
+              fetchStudentInterviewDetail(interviewId),
+              fetchStudentMalpracticeStatus(),
+            ]);
+            return { workspaceDetail, malpracticeStatus };
+          },
+          { force }
+        );
+        applyBundle(bundle);
+      } catch (err) {
+        if (!cached) {
+          setError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyBundle, cacheKey, interviewId, isStudent, userId]
+  );
 
   useEffect(() => {
-    void loadDetail();
+    void loadDetail(false);
   }, [loadDetail]);
 
   const loadRescheduleSlots = useCallback(async () => {
@@ -159,6 +225,7 @@ export function StudentInterviewDetailView({
         reason: cancelReason.trim(),
         idempotencyKey: cancelIdemKey,
       });
+      if (userId) invalidateUserCache(userId, "student:");
       setCancelModalOpen(false);
       setCancelReason("");
       setCancelIdemKey(generateUuid());
@@ -167,7 +234,7 @@ export function StudentInterviewDetailView({
         description: "Your booking has been cancelled and the slot released.",
         tone: "info",
       });
-      await loadDetail();
+      await loadDetail(true);
     } catch (err) {
       setCancelError(formatApiErrorMessage(err));
     } finally {
@@ -196,6 +263,7 @@ export function StudentInterviewDetailView({
         reason: rescheduleReason.trim(),
         idempotencyKey: rescheduleIdemKey,
       });
+      if (userId) invalidateUserCache(userId, "student:");
       setRescheduleOpen(false);
       setRescheduleReason("");
       setSelectedNewSlot(null);
@@ -205,7 +273,7 @@ export function StudentInterviewDetailView({
         description: `Updated appointment to ${formatTimestamp(selectedNewSlot.startsAt, detail.interview.timezone)}.`,
         tone: "success",
       });
-      await loadDetail();
+      await loadDetail(true);
     } catch (err) {
       setRescheduleError(formatApiErrorMessage(err));
     } finally {
@@ -241,7 +309,7 @@ export function StudentInterviewDetailView({
       {loading ? (
         <SectionSkeleton rows={6} />
       ) : error ? (
-        <ErrorBanner message={error} onRetry={loadDetail} />
+        <ErrorBanner message={error} onRetry={() => void loadDetail(true)} />
       ) : !detail ? (
         <EmptyState
           title="Interview not found"
@@ -249,7 +317,7 @@ export function StudentInterviewDetailView({
           action={
             <Link
               href="/student/interviews"
-              className="inline-flex items-center rounded-md bg-[var(--accent-primary)] px-4 py-2 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+              className="inline-flex items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)]"
             >
               Return to My Interviews
             </Link>
@@ -257,8 +325,13 @@ export function StudentInterviewDetailView({
         />
       ) : (
         (() => {
-          const { interview, interviewer, attendance, result, reschedule_history } =
-            detail;
+          const {
+            interview,
+            interviewer,
+            attendance,
+            result,
+            reschedule_history,
+          } = detail;
           const statusMeta = getBookingStatusMeta(interview.status);
           const outcomeMeta = result ? getOutcomeMeta(result.outcome) : null;
           const certMeta = awardRow?.awardStatus
@@ -266,8 +339,25 @@ export function StudentInterviewDetailView({
             : null;
           const modifyEligibility = canStudentModifyBooking(interview);
 
+          let stage: ProgressionStageKey = "interview";
+          if (awardRow?.awardStatus === "AWARDED" || awardRow?.awardStatus === "REINSTATED" || awardRow?.awardStatus === "CERTIFICATION_PENDING") {
+            stage = "certification";
+          } else if (
+            interview.status === "AWAITING_OUTCOME" ||
+            interview.status === "EVALUATED" ||
+            result
+          ) {
+            stage = "evaluation";
+          }
+
           return (
             <div className="space-y-6">
+              <GritProgressionTrack
+                title="Interview Lifecycle"
+                activeStage={stage}
+                compact
+              />
+
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                 <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6 lg:col-span-2">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-hairline)] pb-4">
@@ -326,12 +416,14 @@ export function StudentInterviewDetailView({
                         {attendance ? (
                           <StatusText
                             label={
-                              getAttendanceStatusMeta(attendance.student_attendance)
-                                .label
+                              getAttendanceStatusMeta(
+                                attendance.student_attendance
+                              ).label
                             }
                             tone={
-                              getAttendanceStatusMeta(attendance.student_attendance)
-                                .tone
+                              getAttendanceStatusMeta(
+                                attendance.student_attendance
+                              ).tone
                             }
                           />
                         ) : (
@@ -374,9 +466,12 @@ export function StudentInterviewDetailView({
                         type="button"
                         disabled={!modifyEligibility.allowed}
                         onClick={openReschedulePanel}
-                        className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
+                        <CalendarClock
+                          className="h-3.5 w-3.5"
+                          aria-hidden="true"
+                        />
                         <span>Reschedule</span>
                       </button>
                       <button
@@ -387,7 +482,7 @@ export function StudentInterviewDetailView({
                           setCancelIdemKey(generateUuid());
                           setCancelModalOpen(true);
                         }}
-                        className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border-hairline)] bg-[var(--status-error-bg)] px-3.5 py-1.5 text-xs font-medium text-[var(--status-error)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--status-error)]/30 bg-[var(--status-error-bg)] px-3.5 py-1.5 text-xs font-medium text-[var(--status-error)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
                         <span>Cancel Booking</span>
@@ -398,7 +493,7 @@ export function StudentInterviewDetailView({
 
                 <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
                   <h2 className="border-b border-[var(--border-hairline)] pb-4 text-base font-semibold text-[var(--text-primary)]">
-                    Evaluation & Certification
+                    Evaluation &amp; Certification
                   </h2>
 
                   {result && outcomeMeta ? (
@@ -487,7 +582,7 @@ export function StudentInterviewDetailView({
                     <button
                       type="button"
                       onClick={() => void loadRescheduleSlots()}
-                      className="inline-flex items-center gap-1 rounded-md border border-[var(--border-hairline)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                      className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-[var(--border-hairline)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
                     >
                       <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                       <span>Refresh Slots</span>
@@ -563,7 +658,7 @@ export function StudentInterviewDetailView({
                         value={rescheduleReason}
                         onChange={(e) => setRescheduleReason(e.target.value)}
                         placeholder="Briefly describe why you need to move this interview..."
-                        className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-2.5 text-sm text-[var(--text-primary)]"
+                        className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] p-2.5 text-sm text-[var(--text-primary)]"
                       />
                     </div>
 
@@ -571,7 +666,7 @@ export function StudentInterviewDetailView({
                       <button
                         type="button"
                         onClick={() => setRescheduleOpen(false)}
-                        className="min-h-9 rounded-md border border-[var(--border-hairline)] px-4 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                        className="min-h-9 whitespace-nowrap rounded-md border border-[var(--border-hairline)] px-4 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
                       >
                         Close
                       </button>
@@ -579,7 +674,7 @@ export function StudentInterviewDetailView({
                         type="button"
                         disabled={rescheduling || !selectedNewSlot}
                         onClick={() => void handleConfirmReschedule()}
-                        className="min-h-9 rounded-md bg-[var(--accent-primary)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)] disabled:opacity-50"
+                        className="min-h-9 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)] disabled:opacity-50"
                       >
                         {rescheduling
                           ? "Rescheduling..."
@@ -608,11 +703,17 @@ export function StudentInterviewDetailView({
                         <p className="font-medium text-[var(--text-primary)]">
                           Moved from{" "}
                           <span className="tabular-nums">
-                            {formatTimestamp(entry.old_starts_at, interview.timezone)}
+                            {formatTimestamp(
+                              entry.old_starts_at,
+                              interview.timezone
+                            )}
                           </span>{" "}
                           to{" "}
                           <span className="tabular-nums">
-                            {formatTimestamp(entry.new_starts_at, interview.timezone)}
+                            {formatTimestamp(
+                              entry.new_starts_at,
+                              interview.timezone
+                            )}
                           </span>
                         </p>
                         {entry.reason ? (
@@ -626,70 +727,43 @@ export function StudentInterviewDetailView({
                 </section>
               ) : null}
 
-              {/* Cancel Booking Modal */}
-              {cancelModalOpen ? (
-                <div
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-                  role="dialog"
-                  aria-modal="true"
-                  aria-labelledby="cancel-booking-title"
-                >
-                  <div className="w-full max-w-md rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
-                    <h2
-                      id="cancel-booking-title"
-                      className="text-base font-semibold text-[var(--text-primary)]"
-                    >
-                      Cancel Interview Booking
-                    </h2>
-                    <p className="mt-1.5 text-xs leading-relaxed text-[var(--text-secondary)]">
-                      Cancelling releases this slot immediately so another
-                      student can book it. Provide a brief reason below.
+              <ConfirmDialog
+                open={cancelModalOpen}
+                title="Cancel Interview Booking"
+                description="Cancelling releases this slot immediately so another student can book it. Provide a brief reason below."
+                confirmLabel="Confirm Cancellation"
+                cancelLabel="Keep Booking"
+                destructive
+                busy={cancelling}
+                onConfirm={() => void handleConfirmCancel()}
+                onCancel={() => {
+                  if (!cancelling) setCancelModalOpen(false);
+                }}
+              >
+                <div className="space-y-3">
+                  {cancelError ? (
+                    <p className="rounded bg-[var(--status-error-bg)] p-2.5 text-xs text-[var(--status-error)]">
+                      {cancelError}
                     </p>
-
-                    {cancelError ? (
-                      <p className="mt-3 rounded bg-[var(--status-error-bg)] p-2.5 text-xs text-[var(--status-error)]">
-                        {cancelError}
-                      </p>
-                    ) : null}
-
-                    <div className="mt-4">
-                      <label
-                        htmlFor="cancel-reason-input"
-                        className="mb-1.5 block text-xs font-medium text-[var(--text-primary)]"
-                      >
-                        Cancellation reason (Required)
-                      </label>
-                      <textarea
-                        id="cancel-reason-input"
-                        rows={3}
-                        value={cancelReason}
-                        onChange={(e) => setCancelReason(e.target.value)}
-                        placeholder="Explain why you need to cancel..."
-                        className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-2.5 text-sm text-[var(--text-primary)]"
-                      />
-                    </div>
-
-                    <div className="mt-5 flex justify-end gap-2.5">
-                      <button
-                        type="button"
-                        disabled={cancelling}
-                        onClick={() => setCancelModalOpen(false)}
-                        className="min-h-9 rounded-md border border-[var(--border-hairline)] px-4 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
-                      >
-                        Keep Booking
-                      </button>
-                      <button
-                        type="button"
-                        disabled={cancelling}
-                        onClick={() => void handleConfirmCancel()}
-                        className="min-h-9 rounded-md bg-[var(--status-error)] px-4 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-                      >
-                        {cancelling ? "Cancelling..." : "Confirm Cancellation"}
-                      </button>
-                    </div>
+                  ) : null}
+                  <div>
+                    <label
+                      htmlFor="cancel-reason-input"
+                      className="mb-1.5 block text-xs font-medium text-[var(--text-primary)]"
+                    >
+                      Cancellation reason (Required)
+                    </label>
+                    <textarea
+                      id="cancel-reason-input"
+                      rows={3}
+                      value={cancelReason}
+                      onChange={(e) => setCancelReason(e.target.value)}
+                      placeholder="Explain why you need to cancel..."
+                      className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] p-2.5 text-sm text-[var(--text-primary)]"
+                    />
                   </div>
                 </div>
-              ) : null}
+              </ConfirmDialog>
             </div>
           );
         })()
