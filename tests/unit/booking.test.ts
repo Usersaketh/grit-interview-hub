@@ -43,4 +43,16 @@ describe("booking RPC error mapping", () => {
     expect(error.status).toBe(400);
     expect(error.code).toBe("BOOKING_FAILED");
   });
+
+
+  it("maps reused idempotency keys with different payloads to a conflict", () => {
+    const error = mapBookingRpcError({
+      message: "idempotency_key_reused",
+      code: "P0001",
+    });
+
+    expect(error.status).toBe(409);
+    expect(error.code).toBe("IDEMPOTENCY_KEY_REUSED");
+  });
+
 });

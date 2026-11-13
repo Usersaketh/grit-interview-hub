@@ -40,6 +40,15 @@ export function mapBookingRpcError(error: BookingRpcError): AppError {
       "This interviewer is currently unavailable"
     );
   }
+
+  if (message.includes("idempotency_key_reused")) {
+    return new AppError(
+      "IDEMPOTENCY_KEY_REUSED",
+      409,
+      "This idempotency key was already used for a different booking request. Use a new key."
+    );
+  }
+
   if (
     message.includes("conflict") ||
     error.code === "23505" ||
