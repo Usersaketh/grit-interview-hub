@@ -3,7 +3,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getConfig } from "@backend/lib/config";
 
 export async function middleware(request: NextRequest) {
-  const config = getConfig();
+  let config;
+  try {
+    config = getConfig();
+  } catch {
+    return NextResponse.next({ request });
+  }
 
   let response = NextResponse.next({ request });
 
@@ -36,7 +41,11 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  await supabase.auth.getUser();
+  try {
+    await supabase.auth.getUser();
+  } catch {
+    // Allow public routes to render even if Supabase is unreachable
+  }
 
   return response;
 }

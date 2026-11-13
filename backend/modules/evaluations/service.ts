@@ -7,21 +7,50 @@ export type EvaluationInput = {
   idempotencyKey: string;
 };
 
+export type AttendanceStatus = "ATTENDED" | "LATE" | "NO_SHOW";
+
+export type StartInterviewInput = {
+  studentAttendance?: AttendanceStatus;
+  interviewerAttendance?: AttendanceStatus;
+  notes?: string;
+  idempotencyKey: string;
+};
+
+export type CompleteSessionInput = {
+  studentAttendance?: AttendanceStatus;
+  interviewerAttendance?: AttendanceStatus;
+  notes?: string;
+  idempotencyKey: string;
+};
+
+export type RecordAttendanceInput = {
+  studentAttendance: AttendanceStatus;
+  interviewerAttendance: AttendanceStatus;
+  notes?: string;
+  markNoShow?: boolean;
+  idempotencyKey: string;
+};
+
 export function mapEvaluationRpcError(error: {
   code?: string;
   message: string;
 }): AppError {
-  const message = error.message.toLowerCase();
+  const message = (error.message ?? "").toLowerCase();
+
+  if (message.includes("unauthenticated")) {
+    return new AppError("UNAUTHENTICATED", 401, "Authentication is required");
+  }
 
   if (
     message.includes("not_assigned_interviewer") ||
     message.includes("interviewer_role_required") ||
-    message.includes("profile_inactive")
+    message.includes("profile_inactive") ||
+    message.includes("forbidden")
   ) {
     return new AppError(
       "FORBIDDEN",
       403,
-      "Only an active, assigned interviewer may submit this evaluation"
+      "Only an active, assigned interviewer or staff member may perform this action"
     );
   }
 
@@ -32,12 +61,13 @@ export function mapEvaluationRpcError(error: {
   if (
     message.includes("retake_after_required") ||
     message.includes("idempotency_key_required") ||
+    message.includes("invalid_idempotency_key") ||
     message.includes("outcome_required")
   ) {
     return new AppError(
       "VALIDATION_ERROR",
       422,
-      "The evaluation request contains invalid or missing fields"
+      "The interview request contains invalid or missing fields"
     );
   }
 
@@ -45,7 +75,7 @@ export function mapEvaluationRpcError(error: {
     return new AppError(
       "INVALID_INTERVIEW_STATUS",
       409,
-      "An evaluation can only be submitted after the interview has started or completed"
+      "This action is not valid for the interview's current status"
     );
   }
 
@@ -65,7 +95,7 @@ export function mapEvaluationRpcError(error: {
   return new AppError(
     "EVALUATION_FAILED",
     400,
-    "Evaluation could not be submitted"
+    "Interview operation could not be completed"
   );
 }
 
@@ -80,6 +110,71 @@ export async function submitEvaluation(
     p_feedback: input.feedback ?? null,
     p_retake_after: input.retakeAfter ?? null,
     p_idempotency_key: input.idempotencyKey,
+  });
+
+  if (error) throw mapEvaluationRpcError(error);
+
+  return data;
+}
+
+export async function startInterviewSession(
+  db: any,
+  interviewId: string,
+  input: StartInterviewInput
+) {
+  const { data, error } = await db.rpc("start_interview", {
+    p_interview_id: interviewId,
+    p_idempotency_key: input.idempotencyKey,
+    p_student_attendance: input.studentAttendance ?? "ATTENDED",
+    p_interviewer_attendance: input.interviewerAttendance ?? "ATTENDED",
+    p_notes: input.notes ?? null,
+  });
+
+  if (error) throw mapEvaluationRpcError(error);
+
+  return data;
+}
+
+export async function completeInterviewSession(
+  db: any,
+  interviewId: string,
+  input: CompleteSessionInput
+) {
+  const { data, error } = await db.rpc("complete_interview_session", {
+    p_interview_id: interviewId,
+    p_idempotency_key: input.idempotencyKey,
+    p_student_attendance: input.studentAttendance ?? null,
+    p_interviewer_attendance: input.interviewerAttendance ?? null,
+    p_notes: input.notes ?? null,
+  });
+
+  if (error) throw mapEvaluationRpcError(error);
+
+  return data;
+}
+
+export async function recordInterviewAttendance(
+  db: any,
+  interviewId: string,
+  input: RecordAttendanceInput
+) {
+  const { data, error } = await db.rpc("record_interview_attendance", {
+    p_interview_id: interviewId,
+    p_student_attendance: input.studentAttendance,
+    p_interviewer_attendance: input.interviewerAttendance,
+    p_notes: input.notes ?? null,
+    p_mark_no_show: Boolean(input.markNoShow),
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+  if (error) throw mapEvaluationRpcError(error);
+
+  return data;
+}
+
+export async function getInterviewWorkspaceDetail(db: any, interviewId: string) {
+  const { data, error } = await db.rpc("get_interview_workspace_detail", {
+    p_interview_id: interviewId,
   });
 
   if (error) throw mapEvaluationRpcError(error);

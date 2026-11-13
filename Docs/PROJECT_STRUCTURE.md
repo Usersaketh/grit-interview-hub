@@ -2,76 +2,65 @@
 
 ## Overview
 
-GRIT Interview Hub is a Next.js App Router application with a cleanly separated frontend and backend. The application is API/database-first: the production surface is the `/api/v1` HTTP API backed by Supabase (Auth, PostgreSQL, RLS). The `frontend/` directory exists to hold future client-side UI code; no product frontend ships in this iteration.
+GRIT Interview Hub is a full-stack Next.js 15 App Router modular monolith combining a complete React frontend (`frontend/` + `src/app/` pages) with a cleanly separated server-side API and domain layer (`backend/` + `src/app/api/v1/`), backed by Supabase Auth and PostgreSQL migrations (`supabase/`).
 
 ## Directory layout
 
 ```
 frontend/
-  components/      Reusable UI components
-  features/        Feature-specific UI (student, interviewer, operations)
-  services/        Frontend API clients that call existing /api/v1 routes
-  hooks/           Frontend React hooks
-  types/           Frontend-specific TypeScript types
-  styles/          Frontend styles
+  components/      Shared UI primitives (AppShell, ConfirmDialog, PageHeader, StatusText, SurfaceStates, ThemeToggle)
+  features/
+    auth/          LandingView, LoginView, SignupView, AcceptInvitationView
+    student/       StudentDashboard, Badges, Interviews, Booking (slot discovery), InterviewDetail (cancel/reschedule), Malpractice
+    interviewer/   InterviewerDashboard, Availability, Schedule, History, InterviewerEvaluationView (lifecycle + attendance + rubric)
+    operations/    OperationsDashboard, Invitations, Certifications, CertificationDetail, MalpracticeQueue, MalpracticeDetail, Interviews, Students, AuditExplorer
+  hooks/           useAuth, useToast, useTheme
+  lib/             Pure frontend domain validation/state helpers (`domain.ts`) + `node:test` suite (`domain.test.ts`)
+  services/        Typed same-origin API clients (`apiClient.ts`, `hubApi.ts`, `supabaseBrowser.ts`)
+  styles/          Tailwind v4 theme & CSS design tokens (`globals.css`)
+  types/           API request/response and domain TypeScript contracts (`api.ts`)
 
 backend/
-  modules/         Backend business-logic services (eligibility, availability,
-                   booking, evaluations, malpractice)
-  lib/             Backend-only utilities (Supabase clients, config,
-                   authorization, errors, logging)
-  validation/      Zod validation schemas used at API boundaries
+  modules/
+    auth/          Public student signup & role-injection defense
+    invitations/   SHA-256 invitation token lifecycle & interviewer provisioning
+    eligibility/   Skill clearance checks
+    availability/  DST-safe slot computation & availability window math
+    booking/       Interviewer directory, slot discovery, booking, cancellation, rescheduling
+    evaluations/   Session start/complete, attendance/no-show, workspace detail, result submission
+    malpractice/   Malpractice queue/review/nullify/reinstate, certification queue/approval, audit logs
+  lib/             Supabase server/admin clients, config, authorize, errors, logging, rateLimit
+  validation/      Zod schemas for all API routes (`schemas.ts`)
 
 src/
-  app/             Next.js App Router routing layer (pages, layouts,
-                   and /api/v1 route handlers). Must NOT be moved.
+  middleware.ts    Session refresh + safe fallback when unconfigured
+  app/
+    page.tsx, login/, signup/, invitations/accept/
+    student/...
+    interviewer/...
+    operations/...
+    api/v1/
+      auth/signup/
+      invitations/{verify,accept}/
+      profile/
+      student/{interviewers,slots,badges/[badgeId]/eligibility,interviews,interviews/book,interviews/[id],interviews/[id]/cancel,interviews/[id]/reschedule,malpractice-status}/
+      interviewer/{availability,availability/[id],interviews/[id],interviews/[id]/start,interviews/[id]/awaiting-outcome,interviews/[id]/attendance,interviews/[id]/result}/
+      admin/{dashboard,invitations,invitations/[id]/revoke,badge-certifications,badge-certifications/[id],badge-certifications/[id]/approve,malpractice,malpractice/[id]/review,malpractice/[id]/nullify,malpractice/[id]/reinstate,audit-logs}/
 
-supabase/          Migrations and seed data (untouched)
-tests/             Vitest unit tests
-Docs/              Documentation
-public/            Static assets
+supabase/
+  migrations/      202611120001 through 202611140005
+  seed.sql         Fictional seed users, badges, skill progress, availability, and invitations setup
+
+tests/
+  unit/            Vitest unit tests covering auth signup, invitations, eligibility, availability/DST, booking, evaluations, certifications/audit, malpractice
 ```
-
-## Why src/app/ remains the Next.js routing layer
-
-Next.js App Router discovers pages, layouts, template, route handlers, and API
-endpoints by file-system convention under `src/app/`. Moving these files would
-break routing and change endpoint URLs, which is explicitly prohibited. The
-route handlers under `src/app/api/v1/` therefore stay exactly where they are,
-with unchanged URLs and request/response contracts.
-
-Route handlers validate input (Zod), authenticate/authorize via
-`backend/lib/auth/authorize`, then delegate to the appropriate
-`backend/modules/*` service. They own HTTP concerns only; domain rules live in
-`backend/modules/`.
-
-## How frontend services communicate with existing API routes
-
-Frontend API clients under `frontend/services/` call the existing
-`/api/v1/` route handlers (e.g. `/api/v1/student/interviews/book`) using the
-browser fetch API or a lightweight client. These are relative, same-origin
-calls, so no backend URL contract changes. No service-role credentials or
-server-only modules are imported into frontend code.
-
-## Where shared code belongs
-
-There is no genuinely shared frontend/backend module in this codebase: every
-file outside `src/app/` is server-side backend code (Supabase service-role
-access, authorization, RPC error mapping, business logic). Consequently all of
-it lives under `backend/`. If truly shared code is introduced later, it should
-live in a location both sides can import without creating inappropriate
-frontend/backend dependencies (for example a `shared/` directory at the repo
-root or colocated with its primary consumer), never duplicated as compatibility
-copies.
 
 ## Import alias conventions
 
 Defined in `tsconfig.json` and `vitest.config.ts`:
 
-- `@/*` -> `./src/*` - Next.js app router and anything still under `src/`
-- `@backend/*` -> `./backend/*` - backend modules, lib, and validation
-- `@frontend/*` -> `./frontend/*` - frontend code (reserved for future UI)
+- `@/*` -> `./src/*`
+- `@backend/*` -> `./backend/*`
+- `@frontend/*` -> `./frontend/*`
 
-API route handlers under `src/app/api/` import from `@backend/...`. Tests
-import from `@backend/...` as well. Avoid long relative import chains and do not
-re-export moved modules from their old locations.
+Route handlers under `src/app/api/v1/` import strictly from `@backend/*`. Frontend code under `frontend/` and page entries under `src/app/` never import `backend/lib/supabase/admin.ts` or any service-role credential.

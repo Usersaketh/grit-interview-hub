@@ -321,3 +321,78 @@ export async function getStudentMalpracticeStatus(db: any) {
   const rows = validateStudentMalpracticeRpcResponse(data);
   return rows.map(mapStudentMalpracticeRpcRow);
 }
+
+export async function listBadgeCertifications(
+  db: any,
+  filters?: { status?: string; search?: string }
+) {
+  const { data, error } = await db.rpc("list_badge_certifications", {
+    p_status: filters?.status ?? null,
+    p_search: filters?.search ?? null,
+  });
+
+  if (error) throw mapMalpracticeRpcError(error);
+
+  return data ?? [];
+}
+
+export async function getBadgeCertificationDetail(db: any, badgeAwardId: string) {
+  const { data, error } = await db.rpc("get_badge_certification_detail", {
+    p_badge_award_id: badgeAwardId,
+  });
+
+  if (error) throw mapMalpracticeRpcError(error);
+
+  return data;
+}
+
+export type AuditLogQueryFilters = {
+  actorId?: string;
+  entityType?: string;
+  entityId?: string;
+  action?: string;
+  search?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export async function listAuditLogs(db: any, filters: AuditLogQueryFilters = {}) {
+  const { data, error } = await db.rpc("list_audit_logs", {
+    p_actor_id: filters.actorId ?? null,
+    p_entity_type: filters.entityType ?? null,
+    p_entity_id: filters.entityId ?? null,
+    p_action: filters.action ?? null,
+    p_search: filters.search ?? null,
+    p_from: filters.from ?? null,
+    p_to: filters.to ?? null,
+    p_limit: filters.limit ?? 50,
+    p_offset: filters.offset ?? 0,
+  });
+
+  if (error) throw mapMalpracticeRpcError(error);
+
+  const rows = Array.isArray(data) ? data : [];
+  const totalCount = rows.length > 0 ? Number(rows[0].total_count ?? rows.length) : 0;
+
+  return {
+    items: rows.map((row: any) => ({
+      id: row.id,
+      actorId: row.actor_id,
+      actorName: row.actor_name,
+      actorEmail: row.actor_email,
+      entityType: row.entity_type,
+      entityId: row.entity_id,
+      action: row.action,
+      previousValue: row.previous_value,
+      newValue: row.new_value,
+      reason: row.reason,
+      createdAt: row.created_at,
+    })),
+    totalCount,
+    limit: filters.limit ?? 50,
+    offset: filters.offset ?? 0,
+  };
+}
+

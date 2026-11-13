@@ -1,0 +1,363 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  Award,
+  Calendar,
+  CalendarClock,
+  ClipboardCheck,
+  FileText,
+  History,
+  LayoutDashboard,
+  LogOut,
+  Mail,
+  Menu,
+  ShieldAlert,
+  ShieldCheck,
+  Users,
+  X,
+} from "lucide-react";
+import { useAuth } from "@frontend/hooks/useAuth";
+import { ThemeSwitch } from "@frontend/components/ThemeSwitch";
+import { SectionSkeleton } from "@frontend/components/SurfaceStates";
+import type { AppRole } from "@frontend/types/api";
+
+interface NavItem {
+  label: string;
+  href: string;
+  icon: typeof LayoutDashboard;
+}
+
+interface NavSection {
+  title: string;
+  roles: AppRole[];
+  items: NavItem[];
+}
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    title: "Student Portal",
+    roles: ["STUDENT"],
+    items: [
+      { label: "Dashboard", href: "/student", icon: LayoutDashboard },
+      { label: "Book Interview", href: "/student/interviews/book", icon: CalendarClock },
+      { label: "My Interviews", href: "/student/interviews", icon: Calendar },
+      { label: "My Badges", href: "/student/badges", icon: Award },
+      { label: "Malpractice Status", href: "/student/malpractice", icon: ShieldAlert },
+    ],
+  },
+  {
+    title: "Interviewer Portal",
+    roles: ["INTERVIEWER"],
+    items: [
+      { label: "Overview", href: "/interviewer", icon: LayoutDashboard },
+      { label: "Schedule", href: "/interviewer/schedule", icon: Calendar },
+      { label: "Availability", href: "/interviewer/availability", icon: CalendarClock },
+      { label: "Evaluation History", href: "/interviewer/history", icon: History },
+    ],
+  },
+  {
+    title: "Operations Portal",
+    roles: ["OPERATIONS", "ADMIN"],
+    items: [
+      { label: "Overview", href: "/operations", icon: LayoutDashboard },
+      { label: "Students", href: "/operations/students", icon: Users },
+      { label: "Invitations", href: "/operations/invitations", icon: Mail },
+      { label: "Interviews", href: "/operations/interviews", icon: Calendar },
+      { label: "Availability", href: "/operations/availability", icon: CalendarClock },
+      { label: "Certifications", href: "/operations/certifications", icon: ShieldCheck },
+      { label: "Malpractice", href: "/operations/malpractice", icon: ShieldAlert },
+      { label: "Audit History", href: "/operations/audit", icon: FileText },
+    ],
+  },
+];
+
+interface AppShellProps {
+  allowedRoles?: AppRole[];
+  sectionLabel?: string;
+  children: React.ReactNode;
+}
+
+export function AppShell({
+  allowedRoles,
+  sectionLabel,
+  children,
+}: AppShellProps) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { profile, loading, error, signOut, refreshProfile } = useAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const visibleSections = profile
+    ? NAV_SECTIONS.filter((section) =>
+        section.roles.some((role) => profile.roles.includes(role))
+      )
+    : [];
+
+  const hasAccess =
+    !allowedRoles ||
+    (profile !== null &&
+      allowedRoles.some((role) => profile.roles.includes(role)));
+
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    try {
+      await signOut();
+      router.push("/login");
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
+  const renderNavLinks = (onNavigate?: () => void) => (
+    <div className="space-y-6">
+      {visibleSections.map((section) => (
+        <div key={section.title}>
+          <p className="mb-2 px-3 text-xs font-semibold text-[var(--text-muted)]">
+            {section.title}
+          </p>
+          <ul className="space-y-1">
+            {section.items.map((item) => {
+              const Icon = item.icon;
+              const isRoot =
+                item.href === "/student" ||
+                item.href === "/interviewer" ||
+                item.href === "/operations";
+              const active = isRoot
+                ? pathname === item.href
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    onClick={onNavigate}
+                    className={`flex min-h-10 items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] ${
+                      active
+                        ? "bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{item.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="flex min-h-screen bg-[var(--bg-canvas)] text-[var(--text-primary)]">
+      {/* Desktop persistent sidebar */}
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-[var(--border-hairline)] bg-[var(--bg-surface)] lg:flex">
+        <div className="flex h-14 items-center border-b border-[var(--border-hairline)] px-5">
+          <Link
+            href="/"
+            className="whitespace-nowrap text-base font-semibold tracking-tight text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
+          >
+            GRIT Interview Hub
+          </Link>
+        </div>
+
+        <nav aria-label="Primary navigation" className="flex-1 overflow-y-auto px-3 py-5">
+          {loading ? (
+            <div className="space-y-2 px-3">
+              <div className="h-4 w-28 rounded bg-[var(--bg-elevated)]" />
+              <div className="h-8 w-full rounded bg-[var(--bg-elevated)]" />
+              <div className="h-8 w-full rounded bg-[var(--bg-elevated)]" />
+              <div className="h-8 w-full rounded bg-[var(--bg-elevated)]" />
+            </div>
+          ) : visibleSections.length > 0 ? (
+            renderNavLinks()
+          ) : (
+            <div className="px-3 text-xs leading-relaxed text-[var(--text-secondary)]">
+              Sign in with an authorized GRIT account to access portal navigation.
+            </div>
+          )}
+        </nav>
+
+        {profile ? (
+          <div className="border-t border-[var(--border-hairline)] p-4">
+            <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+              {profile.full_name}
+            </p>
+            <p className="truncate text-xs text-[var(--text-secondary)]">
+              {profile.email}
+            </p>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              {profile.roles.join(" · ") || "No assigned role"}
+            </p>
+          </div>
+        ) : null}
+      </aside>
+
+      {/* Mobile slide-over drawer */}
+      {mobileMenuOpen ? (
+        <div className="fixed inset-0 z-50 flex lg:hidden" role="presentation">
+          <div
+            className="fixed inset-0 bg-black/45"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <aside className="relative z-10 flex w-72 max-w-[85vw] flex-col border-r border-[var(--border-hairline)] bg-[var(--bg-surface)]">
+            <div className="flex h-14 items-center justify-between border-b border-[var(--border-hairline)] px-4">
+              <Link
+                href="/"
+                onClick={() => setMobileMenuOpen(false)}
+                className="whitespace-nowrap text-base font-semibold tracking-tight text-[var(--text-primary)]"
+              >
+                GRIT Interview Hub
+              </Link>
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close navigation menu"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
+            <nav aria-label="Mobile navigation" className="flex-1 overflow-y-auto px-3 py-4">
+              {renderNavLinks(() => setMobileMenuOpen(false))}
+            </nav>
+            {profile ? (
+              <div className="border-t border-[var(--border-hairline)] p-4">
+                <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                  {profile.full_name}
+                </p>
+                <p className="truncate text-xs text-[var(--text-secondary)]">
+                  {profile.roles.join(" · ")}
+                </p>
+              </div>
+            ) : null}
+          </aside>
+        </div>
+      ) : null}
+
+      {/* Main content area */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-[var(--border-hairline)] bg-[var(--bg-surface)] px-4 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open navigation menu"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--border-hairline)] text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] lg:hidden"
+            >
+              <Menu className="h-5 w-5" aria-hidden="true" />
+            </button>
+            <Link
+              href="/"
+              className="whitespace-nowrap text-sm font-semibold text-[var(--text-primary)] lg:hidden"
+            >
+              GRIT Interview Hub
+            </Link>
+            {sectionLabel ? (
+              <span className="hidden truncate text-xs font-medium text-[var(--text-secondary)] lg:inline">
+                {sectionLabel}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="flex shrink-0 items-center gap-3">
+            <ThemeSwitch />
+            {profile ? (
+              <button
+                type="button"
+                onClick={handleSignOut}
+                disabled={signingOut}
+                className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
+              >
+                <LogOut className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>{signingOut ? "Signing out" : "Sign out"}</span>
+              </button>
+            ) : (
+              <Link
+                href={`/login?next=${encodeURIComponent(pathname || "/")}`}
+                className="inline-flex min-h-9 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-3.5 py-1.5 text-xs font-medium text-white hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
+              >
+                Sign in
+              </Link>
+            )}
+          </div>
+        </header>
+
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          {loading ? (
+            <div className="space-y-4">
+              <SectionSkeleton rows={3} />
+              <SectionSkeleton rows={4} />
+            </div>
+          ) : error ? (
+            <div className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
+              <h1 className="text-lg font-semibold text-[var(--text-primary)]">
+                Authentication Verification Error
+              </h1>
+              <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                {error}
+              </p>
+              <button
+                type="button"
+                onClick={() => void refreshProfile()}
+                className="mt-4 inline-flex items-center rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+              >
+                Retry Verification
+              </button>
+            </div>
+          ) : allowedRoles && !profile ? (
+            <div className="mx-auto max-w-lg rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
+              <div className="flex items-center gap-2 text-[var(--text-primary)]">
+                <ClipboardCheck className="h-5 w-5 text-[var(--accent-primary)]" aria-hidden="true" />
+                <h1 className="text-lg font-semibold">Authentication Required</h1>
+              </div>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                You must sign in with an authorized GRIT Interview Hub account to
+                view this portal.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link
+                  href={`/login?next=${encodeURIComponent(pathname || "/")}`}
+                  className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                >
+                  Sign in to Continue
+                </Link>
+                <Link
+                  href="/"
+                  className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                >
+                  Return Home
+                </Link>
+              </div>
+            </div>
+          ) : allowedRoles && !hasAccess ? (
+            <div className="mx-auto max-w-lg rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
+              <h1 className="text-lg font-semibold text-[var(--text-primary)]">
+                Access Restricted
+              </h1>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                Your account ({profile?.roles.join(", ") || "no role"}) does not
+                have permission to access this portal. Required role:{" "}
+                {allowedRoles.join(" or ")}.
+              </p>
+              <div className="mt-5">
+                <Link
+                  href="/"
+                  className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                >
+                  Go to Authorized Portal
+                </Link>
+              </div>
+            </div>
+          ) : (
+            children
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}

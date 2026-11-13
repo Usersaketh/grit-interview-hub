@@ -1,32 +1,209 @@
 openapi: 3.1.0
 info:
   title: GRIT Interview Hub API
-  version: 0.1.0
-  description: Initial backend foundation. Supabase bearer session required.
+  version: 0.2.0
+  description: Complete modular monolith API backed by Supabase Auth and PostgreSQL SECURITY DEFINER RPCs.
 paths:
+  /api/v1/auth/signup:
+    post:
+      summary: Public student-only signup (rejects privileged role fields with 403)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/StudentSignupRequest' } } }
+      responses:
+        '201': { description: Student account registered }
+        '403': { description: Attempted role specification rejected }
+        '409': { description: Email already registered }
+        '422': { description: Validation error or weak password }
+        '429': { description: Rate limited }
+  /api/v1/invitations/verify:
+    get:
+      summary: Verify an interviewer invitation token before acceptance
+      parameters:
+        - { name: token, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Sanitized invitation preview }
+        '404': { description: Invitation not found }
+        '422': { description: Invalid token format }
+  /api/v1/invitations/accept:
+    post:
+      summary: Accept an interviewer invitation (provisions new user or elevates matching signed-in user to INTERVIEWER)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AcceptInvitationRequest' } } }
+      responses:
+        '200': { description: Invitation accepted and INTERVIEWER role granted }
+        '403': { description: Authenticated email does not match invitation }
+        '409': { description: Expired, revoked, accepted, or existing account sign-in required }
+        '429': { description: Rate limited }
   /api/v1/profile:
     get:
+      summary: Current authenticated user profile, roles, and capabilities
+      security: [{ bearerAuth: [] }]
       responses: { '200': { description: Current profile } }
+  /api/v1/student/interviewers:
+    get:
+      summary: List active bookable interviewers
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: badgeId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Active interviewers directory } }
+  /api/v1/student/slots:
+    get:
+      summary: Discover real DST-safe bookable interview slots excluding busy/unavailable/cooldown windows
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: badgeId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: interviewerId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: excludeInterviewId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: durationMinutes, in: query, required: false, schema: { type: integer, minimum: 15, maximum: 180 } }
+      responses: { '200': { description: Bookable slots and student booking state } }
+  /api/v1/student/interviews:
+    get:
+      summary: Student interview history and active bookings
+      security: [{ bearerAuth: [] }]
+      responses: { '200': { description: List of student interviews } }
   /api/v1/student/interviews/book:
     post:
       summary: Atomically book an interview
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/BookingRequest' } } }
-      responses: { '201': { description: Booking created }, '409': { description: Booking conflict or ineligible } }
+      responses: { '201': { description: Booking created }, '409': { description: Booking conflict, cooldown, or ineligible } }
+  /api/v1/student/interviews/{id}:
+    get:
+      summary: Full student interview detail including assessor name, attendance, reschedule history, and evaluation
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Scoped interview workspace detail } }
+  /api/v1/student/interviews/{id}/cancel:
+    post:
+      summary: Cancel an eligible student interview prior to the 2-hour cutoff
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CancelBookingRequest' } } }
+      responses: { '200': { description: Booking cancelled }, '409': { description: Cutoff passed or invalid status } }
+  /api/v1/student/interviews/{id}/reschedule:
+    post:
+      summary: Atomically reschedule a student interview prior to the 2-hour cutoff
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RescheduleBookingRequest' } } }
+      responses: { '200': { description: Booking rescheduled }, '409': { description: Conflict, cutoff passed, or invalid status } }
   /api/v1/student/badges/{badgeId}/eligibility:
     get:
+      summary: Evaluate student eligibility for a badge
+      security: [{ bearerAuth: [] }]
       parameters: [{ name: badgeId, in: path, required: true, schema: { type: string, format: uuid } }]
       responses: { '200': { description: Eligibility decision } }
   /api/v1/student/malpractice-status:
     get:
-      summary: Student's own sanitized badge and malpractice status
-      responses: { '200': { description: Badge awards and malpractice reports (sanitized) } }
+      summary: Student's own sanitized badge awards and malpractice status
+      security: [{ bearerAuth: [] }]
+      responses: { '200': { description: Sanitized awards and report statuses } }
   /api/v1/interviewer/availability:
-    get: { responses: { '200': { description: Availability list } } }
-    post: { responses: { '201': { description: Availability created } } }
+    get:
+      summary: List interviewer recurring availability and overrides
+      security: [{ bearerAuth: [] }]
+      responses: { '200': { description: Availability list } }
+    post:
+      summary: Add recurring availability window
+      security: [{ bearerAuth: [] }]
+      responses: { '201': { description: Availability created } }
+  /api/v1/interviewer/availability/{id}:
+    delete:
+      summary: Remove recurring availability window
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Availability removed } }
+  /api/v1/interviewer/interviews/{id}:
+    get:
+      summary: Scoped interviewer workspace detail including candidate name and history
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Interview workspace detail } }
+  /api/v1/interviewer/interviews/{id}/start:
+    post:
+      summary: Transition BOOKED interview to IN_PROGRESS
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Session started } }
+  /api/v1/interviewer/interviews/{id}/awaiting-outcome:
+    post:
+      summary: Transition IN_PROGRESS interview to AWAITING_OUTCOME
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Session awaiting outcome } }
+  /api/v1/interviewer/interviews/{id}/attendance:
+    post:
+      summary: Record candidate and interviewer attendance or finalize NO_SHOW
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Attendance recorded } }
   /api/v1/interviewer/interviews/{id}/result:
-    post: { responses: { '201': { description: Evaluation submitted } } }
+    post:
+      summary: Submit idempotent immutable evaluation outcome
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '201': { description: Evaluation submitted } }
+  /api/v1/admin/dashboard:
+    get:
+      summary: Operations pipeline summary including pending certifications and pending invitations
+      security: [{ bearerAuth: [] }]
+      responses: { '200': { description: Operations KPIs } }
+  /api/v1/admin/invitations:
+    get:
+      summary: List interviewer invitations (staff only)
+      security: [{ bearerAuth: [] }]
+      responses: { '200': { description: Invitations list } }
+    post:
+      summary: Create a single-use interviewer invitation (staff only)
+      security: [{ bearerAuth: [] }]
+      responses: { '201': { description: Invitation created with one-time accept URL } }
+  /api/v1/admin/invitations/{id}/revoke:
+    post:
+      summary: Revoke a pending interviewer invitation (staff only)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Invitation revoked } }
+  /api/v1/admin/badge-certifications:
+    get:
+      summary: Searchable certification queue (staff only)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string } }
+        - { name: search, in: query, required: false, schema: { type: string } }
+      responses: { '200': { description: Badge certification queue } }
+  /api/v1/admin/badge-certifications/{id}:
+    get:
+      summary: Badge certification detail record (staff only)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Certification record details } }
+  /api/v1/admin/badge-certifications/{id}/approve:
+    post:
+      summary: Approve pending badge certification (staff only)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Certification approved } }
+  /api/v1/admin/audit-logs:
+    get:
+      summary: Staff-only paginated immutable audit trail explorer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: entityType, in: query, required: false, schema: { type: string } }
+        - { name: action, in: query, required: false, schema: { type: string } }
+        - { name: search, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer } }
+        - { name: offset, in: query, required: false, schema: { type: integer } }
+      responses: { '200': { description: Paginated audit log records } }
   /api/v1/admin/malpractice:
     get:
       summary: Staff malpractice case queue
@@ -68,6 +245,22 @@ paths:
       responses: { '200': { description: Badge award reinstated }, '409': { description: No nullified badge } }
 components:
   schemas:
+    StudentSignupRequest:
+      type: object
+      required: [fullName, email, password, confirmPassword]
+      properties:
+        fullName: { type: string, minLength: 2, maxLength: 120 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 128 }
+        confirmPassword: { type: string }
+        campusRef: { type: string, maxLength: 120 }
+    AcceptInvitationRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+        fullName: { type: string }
+        password: { type: string }
     BookingRequest:
       type: object
       required: [badgeId, interviewerId, startsAt, endsAt, timezone, idempotencyKey]
@@ -77,6 +270,22 @@ components:
         startsAt: { type: string, format: date-time }
         endsAt: { type: string, format: date-time }
         timezone: { type: string, example: Asia/Kolkata }
+        idempotencyKey: { type: string, format: uuid }
+    CancelBookingRequest:
+      type: object
+      required: [reason, idempotencyKey]
+      properties:
+        reason: { type: string, minLength: 5, maxLength: 1000 }
+        idempotencyKey: { type: string, format: uuid }
+    RescheduleBookingRequest:
+      type: object
+      required: [newInterviewerId, newStartsAt, newEndsAt, timezone, reason, idempotencyKey]
+      properties:
+        newInterviewerId: { type: string, format: uuid }
+        newStartsAt: { type: string, format: date-time }
+        newEndsAt: { type: string, format: date-time }
+        timezone: { type: string }
+        reason: { type: string, minLength: 5, maxLength: 1000 }
         idempotencyKey: { type: string, format: uuid }
     MalpracticeReportRequest:
       type: object
