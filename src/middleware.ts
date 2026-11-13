@@ -1,6 +1,6 @@
-﻿import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { getConfig } from "@/lib/config";
+import { getConfig } from "@backend/lib/config";
 
 export async function middleware(request: NextRequest) {
   const config = getConfig();

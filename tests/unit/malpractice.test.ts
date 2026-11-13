@@ -8,7 +8,7 @@ import {
   getMalpracticeQueue,
   getStudentMalpracticeStatus,
   approveBadgeCertification,
-} from "@/modules/malpractice/service";
+} from "@backend/modules/malpractice/service";
 
 describe("malpractice RPC error mapping", () => {
   it("maps staff role required to forbidden", () => {

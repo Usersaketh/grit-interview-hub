@@ -1,3 +1,3 @@
-import { NextResponse } from "next/server"; import { requireRole } from "@/lib/auth/authorize"; import { AppError, errorResponse } from "@/lib/errors";
+import { NextResponse } from "next/server"; import { requireRole } from "@backend/lib/auth/authorize"; import { AppError, errorResponse } from "@backend/lib/errors";
 export const runtime = "nodejs";
 export async function GET() { try { const { db, user } = await requireRole("STUDENT"); const { data: student } = await db.from("students").select("id").eq("user_id",user.id).single(); if (!student) throw new AppError("FORBIDDEN",403,"Student profile is required"); const { data, error } = await db.from("interviews").select("*, badges(name, level), interview_results(*)").eq("student_id",student.id).order("starts_at",{ascending:false}); if (error) throw error; return NextResponse.json({ data }); } catch (error) { return errorResponse(error); } }

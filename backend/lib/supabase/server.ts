@@ -1,6 +1,6 @@
-﻿import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { getConfig } from "@/lib/config";
+import { getConfig } from "@backend/lib/config";
 
 export async function createSupabaseServerClient() {
   const config = getConfig();

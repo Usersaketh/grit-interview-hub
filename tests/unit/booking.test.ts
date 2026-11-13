@@ -1,6 +1,6 @@
 
 import { describe, expect, it } from "vitest";
-import { mapBookingRpcError } from "@/modules/booking/service";
+import { mapBookingRpcError } from "@backend/modules/booking/service";
 
 describe("booking RPC error mapping", () => {
   it("maps inactive interviewer to a conflict", () => {

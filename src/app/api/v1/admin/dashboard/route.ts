@@ -1,3 +1,3 @@
-import { NextResponse } from "next/server"; import { requireRole } from "@/lib/auth/authorize"; import { errorResponse } from "@/lib/errors";
+import { NextResponse } from "next/server"; import { requireRole } from "@backend/lib/auth/authorize"; import { errorResponse } from "@backend/lib/errors";
 export const runtime = "nodejs";
 export async function GET() { try { const {db}=await requireRole("OPERATIONS","ADMIN"); const [{count:interviews},{count:pending},{count:results}]=await Promise.all([db.from("interviews").select("id",{count:"exact",head:true}),db.from("interviews").select("id",{count:"exact",head:true}).eq("status","AWAITING_OUTCOME"),db.from("interview_results").select("id",{count:"exact",head:true})]); return NextResponse.json({data:{totalInterviews:interviews??0,pendingEvaluations:pending??0,evaluated:results??0}}); } catch(error) { return errorResponse(error); } }

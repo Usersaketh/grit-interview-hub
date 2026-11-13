@@ -10,11 +10,11 @@ export function evaluateEligibility(requirements: Requirement[], progress: Progr
 export async function getEligibility(db: any, studentId: string, badgeId: string): Promise<EligibilityDecision> {
   const { data: badge, error: badgeError } = await db.from("badges").select("id, is_active").eq("id", badgeId).single();
   if (badgeError) {
-    if (badgeError.code === "PGRST116") throw new (await import("@/lib/errors")).AppError("BADGE_NOT_FOUND", 404, "Badge not found");
+    if (badgeError.code === "PGRST116") throw new (await import("@backend/lib/errors")).AppError("BADGE_NOT_FOUND", 404, "Badge not found");
     throw badgeError;
   }
-  if (!badge) throw new (await import("@/lib/errors")).AppError("BADGE_NOT_FOUND", 404, "Badge not found");
-  if (!badge.is_active) throw new (await import("@/lib/errors")).AppError("BADGE_INACTIVE", 409, "Badge is inactive");
+  if (!badge) throw new (await import("@backend/lib/errors")).AppError("BADGE_NOT_FOUND", 404, "Badge not found");
+  if (!badge.is_active) throw new (await import("@backend/lib/errors")).AppError("BADGE_INACTIVE", 409, "Badge is inactive");
   const [{ data: requirements, error: reqError }, { data: progress, error: progressError }] = await Promise.all([db.from("badge_required_skills").select("skill_id, required_level").eq("badge_id", badgeId), db.from("skill_progress").select("skill_id, achieved_level, verified_at").eq("student_id", studentId)]);
   if (reqError) throw reqError;
   if (progressError) throw progressError;

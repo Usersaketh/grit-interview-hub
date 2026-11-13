@@ -1,9 +1,9 @@
 
 import { NextResponse } from "next/server";
-import { requireRole } from "@/lib/auth/authorize";
-import { errorResponse } from "@/lib/errors";
+import { requireRole } from "@backend/lib/auth/authorize";
+import { errorResponse } from "@backend/lib/errors";
 import { z } from "zod";
-import { approveBadgeCertification } from "@/modules/malpractice/service";
+import { approveBadgeCertification } from "@backend/modules/malpractice/service";
 
 const approveBadgeCertificationSchema = z.object({
   idempotencyKey: z.string().uuid(),

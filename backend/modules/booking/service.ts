@@ -1,5 +1,5 @@
 
-import { AppError } from "@/lib/errors";
+import { AppError } from "@backend/lib/errors";
 
 export type BookingInput = {
   badgeId: string;

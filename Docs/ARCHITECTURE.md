@@ -2,7 +2,7 @@
 
 GRIT Interview Hub is a Next.js App Router modular monolith deployed to Vercel, with Supabase providing Auth, PostgreSQL, Realtime, and (when needed) Storage. The HTTP API lives below `/api/v1`; each handler validates Zod input, authenticates, authorizes, then calls a domain service.
 
-Modules are `eligibility`, `availability`, `booking`, and `evaluations` under `src/modules`. `src/lib` owns Supabase clients, configuration, authorization, errors, logging, and validation. The GRIT adapter boundary is the local `skill_progress` read model: it is intentionally not a fabricated GRIT API. Future GRIT synchronization should replace population of that read model and process `integration_outbox` events.
+Modules are `eligibility`, `availability`, `booking`, `evaluations`, and `malpractice` under `backend/modules`. `backend/lib` owns Supabase clients, configuration, authorization, errors, logging, and validation; `backend/validation` holds the Zod request schemas. The Next.js App Router routing layer (pages, layouts, and `/api/v1` route handlers) remains under `src/app`. Frontend-specific UI, hooks, services, types, and styles live under `frontend`. The GRIT adapter boundary is the local `skill_progress` read model: it is intentionally not a fabricated GRIT API. Future GRIT synchronization should replace population of that read model and process `integration_outbox` events.
 
 ## Security model
 

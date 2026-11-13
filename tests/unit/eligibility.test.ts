@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { evaluateEligibility, getEligibility } from "@/modules/eligibility/service";
-import { AppError } from "@/lib/errors";
+import { evaluateEligibility, getEligibility } from "@backend/modules/eligibility/service";
+import { AppError } from "@backend/lib/errors";
 
 const fixedNow = new Date("2026-06-15T12:00:00Z");
 

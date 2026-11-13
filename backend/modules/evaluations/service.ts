@@ -1,4 +1,4 @@
-﻿import { AppError } from "@/lib/errors";
+import { AppError } from "@backend/lib/errors";
 
 export type EvaluationInput = {
   outcome: "PASS" | "FAIL" | "RETAKE_LATER";

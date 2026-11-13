@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapEvaluationRpcError } from "@/modules/evaluations/service";
+import { mapEvaluationRpcError } from "@backend/modules/evaluations/service";
 
 describe("evaluation RPC error mapping", () => {
   it("does not expose assignment failures as a generic database error", () => {
