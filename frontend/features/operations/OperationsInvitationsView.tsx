@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Check, Copy, Loader2, MailCheck, MailPlus, RefreshCw, ShieldX } from "lucide-react";
+import { Loader2, MailCheck, MailPlus, RefreshCw, ShieldX } from "lucide-react";
 import { AppShell } from "@frontend/components/AppShell";
 import { ConfirmDialog } from "@frontend/components/ConfirmDialog";
 import { PageHeader } from "@frontend/components/PageHeader";
@@ -80,14 +80,14 @@ export function OperationsInvitationsView() {
   const [expiresInDays, setExpiresInDays] = useState(7);
   const [formError, setFormError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [createIdemKey, setCreateIdemKey] = useState(() => generateUuid());
-  const [issuedInviteUrl, setIssuedInviteUrl] = useState<string | null>(null);
   const [emailDelivery, setEmailDelivery] = useState<{
     status: "sent" | "not_configured" | "failed";
     recipient: string;
+    deliveryKind?: "invite" | "magiclink_existing_user";
     error?: string;
   } | null>(null);
-  const [copiedUrl, setCopiedUrl] = useState(false);
 
   // Revoke state
   const [revokeTarget, setRevokeTarget] =
@@ -111,6 +111,7 @@ export function OperationsInvitationsView() {
       }
 
       setError(null);
+      if (force) setRefreshing(true);
       try {
         const data = await fetchWithUserCache(
           userId,
@@ -125,6 +126,7 @@ export function OperationsInvitationsView() {
         }
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
     },
     [isStaff, userId]
@@ -161,17 +163,16 @@ export function OperationsInvitationsView() {
         idempotencyKey: createIdemKey,
       });
 
-      setIssuedInviteUrl(res.inviteUrl);
       setEmailDelivery(
         res.emailDelivery
           ? {
               status: res.emailDelivery.status,
               recipient: res.emailDelivery.recipient,
+              deliveryKind: res.emailDelivery.deliveryKind,
               error: res.emailDelivery.error,
             }
           : null
       );
-      setCopiedUrl(false);
       setEmail("");
       setFullName("");
       setTitle("");
@@ -180,20 +181,22 @@ export function OperationsInvitationsView() {
       if (res.emailDelivery?.status === "sent") {
         pushToast({
           tone: "success",
-          title: "Invitation created and emailed",
-          description: `Sent onboarding link to ${res.invitation.email}.`,
+          title: "Invitation email sent via Supabase Auth",
+          description: `Dispatched onboarding email to ${res.invitation.email}.`,
         });
       } else if (res.emailDelivery?.status === "failed") {
         pushToast({
           tone: "warning",
-          title: "Invitation created (email failed)",
-          description: `Could not email ${res.invitation.email}. Copy and share the one-time link manually.`,
+          title: "Invitation recorded (email dispatch failed)",
+          description:
+            res.emailDelivery.error ||
+            `Could not send Supabase Auth invitation email to ${res.invitation.email}.`,
         });
       } else {
         pushToast({
           tone: "info",
-          title: "Invitation created",
-          description: `Share the single-use onboarding link with ${res.invitation.email} (automated email not configured).`,
+          title: "Invitation recorded",
+          description: `Invitation saved for ${res.invitation.email}. Configure SUPABASE_SERVICE_ROLE_KEY on the server to send Supabase Auth emails.`,
         });
       }
       if (userId) invalidateUserCache(userId, "ops:");
@@ -231,12 +234,6 @@ export function OperationsInvitationsView() {
     } finally {
       setRevoking(false);
     }
-  };
-
-  const handleCopyInviteUrl = async () => {
-    if (!issuedInviteUrl || typeof navigator === "undefined") return;
-    await navigator.clipboard.writeText(issuedInviteUrl);
-    setCopiedUrl(true);
   };
 
   const filteredInvitations = useMemo(() => {
@@ -412,84 +409,62 @@ export function OperationsInvitationsView() {
               )}
               <span>
                 {creating
-                  ? "Creating invitation..."
-                  : "Create Interviewer Invitation"}
+                  ? "Sending Supabase Auth invitation..."
+                  : "Send Interviewer Invitation"}
               </span>
             </button>
           </form>
 
-          {issuedInviteUrl ? (
-            <div className="mt-5 space-y-3 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-4">
+          {emailDelivery ? (
+            <div className="mt-5 space-y-2.5 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-4">
               <div className="flex items-start justify-between gap-2">
                 <p className="text-xs font-semibold text-[var(--text-primary)]">
-                  Single-Use Invitation Link Ready
+                  Supabase Auth Invitation Dispatch
                 </p>
-                {emailDelivery ? (
-                  <StatusText
-                    label={
-                      emailDelivery.status === "sent"
-                        ? "Email sent"
-                        : emailDelivery.status === "failed"
-                          ? "Email failed"
-                          : "Email unconfigured"
-                    }
-                    tone={
-                      emailDelivery.status === "sent"
-                        ? "success"
-                        : emailDelivery.status === "failed"
-                          ? "error"
-                          : "warning"
-                    }
-                  />
-                ) : null}
+                <StatusText
+                  label={
+                    emailDelivery.status === "sent"
+                      ? "Email sent"
+                      : emailDelivery.status === "failed"
+                        ? "Email failed"
+                        : "Server key missing"
+                  }
+                  tone={
+                    emailDelivery.status === "sent"
+                      ? "success"
+                      : emailDelivery.status === "failed"
+                        ? "error"
+                        : "warning"
+                  }
+                />
               </div>
 
               <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
-                {emailDelivery?.status === "sent" ? (
-                  <span className="inline-flex items-center gap-1.5 text-[var(--status-success)]">
-                    <MailCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    Invitation email delivered to {emailDelivery.recipient}. You can also copy the backup link below.
+                {emailDelivery.status === "sent" ? (
+                  <span className="inline-flex items-start gap-1.5 text-[var(--status-success)]">
+                    <MailCheck
+                      className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {emailDelivery.deliveryKind === "magiclink_existing_user"
+                        ? `Sent verified sign-in invitation link to existing account ${emailDelivery.recipient} via Supabase Auth.`
+                        : `Sent Supabase Auth interviewer invitation email to ${emailDelivery.recipient}.`}
+                    </span>
                   </span>
-                ) : emailDelivery?.status === "failed" ? (
+                ) : emailDelivery.status === "failed" ? (
                   <span className="text-[var(--status-error)]">
-                    Automated email delivery failed ({emailDelivery.error || "provider error"}). Copy and share this single-use link directly with {emailDelivery.recipient}.
+                    Supabase Auth invitation dispatch failed (
+                    {emailDelivery.error || "auth error"}). Revoke and retry once
+                    verified, or confirm Redirect URL allow-lists in Supabase.
                   </span>
                 ) : (
                   <span>
-                    Automated email delivery is not configured in this environment. Copy and share this single-use link directly with the invited interviewer.
+                    {emailDelivery.error ||
+                      "SUPABASE_SERVICE_ROLE_KEY is missing on the server, so Supabase Auth invitation email dispatch could not run."}
                   </span>
                 )}
               </p>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={issuedInviteUrl}
-                  aria-label="Generated invitation link"
-                  className="min-w-0 flex-1 rounded border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2.5 py-1.5 font-mono text-[11px] text-[var(--text-primary)]"
-                />
-                <button
-                  type="button"
-                  onClick={() => void handleCopyInviteUrl()}
-                  className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
-                >
-                  {copiedUrl ? (
-                    <>
-                      <Check
-                        className="h-3.5 w-3.5 text-[var(--status-success)]"
-                        aria-hidden="true"
-                      />
-                      <span>Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span>Copy</span>
-                    </>
-                  )}
-                </button>
-              </div>
             </div>
           ) : null}
         </section>
@@ -518,11 +493,15 @@ export function OperationsInvitationsView() {
 
             <button
               type="button"
+              disabled={refreshing}
               onClick={() => void loadInvitations(true)}
-              className="inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
+              className="inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)] disabled:opacity-60"
             >
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Refresh</span>
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+                aria-hidden="true"
+              />
+              <span>{refreshing ? "Refreshing..." : "Refresh"}</span>
             </button>
           </div>
 

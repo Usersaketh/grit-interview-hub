@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarClock, History, RefreshCw, XCircle } from "lucide-react";
+import { CalendarClock, History, MailCheck, RefreshCw, XCircle } from "lucide-react";
 import { AppShell } from "@frontend/components/AppShell";
 import { ConfirmDialog } from "@frontend/components/ConfirmDialog";
 import {
@@ -303,6 +303,15 @@ export function StudentInterviewDetailView({
           detail
             ? `Booking reference ${detail.interview.booking_reference} · Attempt #${detail.interview.attempt_number}`
             : "Scheduled interview details and published outcome."
+        }
+        actions={
+          <Link
+            href="/student/messages"
+            className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]"
+          >
+            <MailCheck className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Student Messages</span>
+          </Link>
         }
       />
 

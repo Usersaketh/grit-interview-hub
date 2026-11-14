@@ -67,15 +67,8 @@ export const revokeInvitationSchema = z
 
 export const acceptInvitationSchema = z
   .object({
-    token: z.string().trim().min(16).max(256),
+    invitationId: z.string().uuid("Valid invitation ID is required"),
     fullName: z.string().trim().min(2).max(120).optional(),
-    password: z
-      .string()
-      .min(8, "Password must be at least 8 characters")
-      .max(128)
-      .regex(/[A-Za-z]/, "Password must include at least one letter")
-      .regex(/\d/, "Password must include at least one number")
-      .optional(),
   })
   .strict();
 

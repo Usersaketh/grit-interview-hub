@@ -32,6 +32,7 @@ import type {
   MalpracticeReinstateInputPayload,
   MalpracticeReportInputPayload,
   MalpracticeReviewInputPayload,
+  NotificationRecord,
   RescheduleBookingPayload,
   SlotsDiscoveryResponse,
   StudentMalpracticeStatusResponse,
@@ -56,15 +57,15 @@ export function signupStudentAccount(
   });
 }
 
-export function verifyInvitationToken(
-  token: string
+export function verifyInvitationById(
+  invitationId: string
 ): Promise<InvitationVerifyInfo> {
   return apiRequest<InvitationVerifyInfo>(
-    `/api/v1/invitations/verify?token=${encodeURIComponent(token)}`
+    `/api/v1/invitations/verify?invitationId=${encodeURIComponent(invitationId)}`
   );
 }
 
-export function acceptInvitationToken(
+export function acceptInvitationById(
   payload: AcceptInvitationPayload
 ): Promise<AcceptInvitationResponse> {
   return apiRequest<AcceptInvitationResponse>("/api/v1/invitations/accept", {
@@ -79,6 +80,21 @@ export function fetchProfile(): Promise<UserProfile> {
 
 export function fetchStudentOverview(): Promise<StudentOverviewResponse> {
   return apiRequest<StudentOverviewResponse>("/api/v1/student/overview");
+}
+
+export function fetchStudentNotifications(): Promise<NotificationRecord[]> {
+  return apiRequest<NotificationRecord[]>("/api/v1/student/notifications");
+}
+
+export function markStudentNotificationRead(
+  notificationId: string
+): Promise<NotificationRecord> {
+  return apiRequest<NotificationRecord>(
+    `/api/v1/student/notifications/${encodeURIComponent(notificationId)}/read`,
+    {
+      method: "POST",
+    }
+  );
 }
 
 export function fetchBadgeEligibility(
@@ -454,7 +470,7 @@ export async function fetchBadgesCatalog(): Promise<BadgeSummary[]> {
   const db = requireSupabaseClient();
   const { data, error } = await db
     .from("badges")
-    .select("id, track_id, external_id, name, level, is_active")
+    .select("id, track_id, external_id, name, level, description, is_active")
     .order("name", { ascending: true });
   if (error) {
     throw new ApiClientError(400, error.code ?? "QUERY_ERROR", error.message);

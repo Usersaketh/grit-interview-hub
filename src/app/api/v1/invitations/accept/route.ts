@@ -4,7 +4,7 @@ import { enforceRateLimit, getClientIp } from "@backend/lib/rateLimit";
 import { createSupabaseAdminClient } from "@backend/lib/supabase/admin";
 import { createSupabaseServerClient } from "@backend/lib/supabase/server";
 import { acceptInvitationSchema } from "@backend/validation/schemas";
-import { acceptInterviewerInvitation } from "@backend/modules/invitations/service";
+import { acceptInterviewerInvitationForSession } from "@backend/modules/invitations/service";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     const input = acceptInvitationSchema.parse(await request.json());
     const userDb = await createSupabaseServerClient();
     const adminDb = createSupabaseAdminClient();
-    const data = await acceptInterviewerInvitation(userDb, adminDb, input);
+    const data = await acceptInterviewerInvitationForSession(userDb, adminDb, input);
 
     return NextResponse.json({ data });
   } catch (error) {

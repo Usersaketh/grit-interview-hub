@@ -367,6 +367,59 @@ export function getPortalDisplayName(path: string): string {
   return "Home";
 }
 
+const PORTAL_ROOT_PATHS = new Set([
+  "/student",
+  "/interviewer",
+  "/operations",
+]);
+
+function normalizeRoutePath(path: string): string {
+  const withoutQuery = path.split("?")[0]?.split("#")[0] ?? "/";
+  if (withoutQuery.length > 1 && withoutQuery.endsWith("/")) {
+    return withoutQuery.slice(0, -1);
+  }
+  return withoutQuery || "/";
+}
+
+/**
+ * Resolves the single active navigation href for a given pathname.
+ * Prefers an exact route match over nested prefix matches, and picks the
+ * longest segment-bounded non-root prefix when on a nested detail route
+ * (e.g. /student/interviews/book matches ONLY Book Interview, while
+ * /student/interviews/<id> matches My Interviews).
+ */
+export function resolveActiveNavHref(
+  pathname: string,
+  items: ReadonlyArray<{ href: string }>
+): string | null {
+  const current = normalizeRoutePath(pathname);
+
+  for (const item of items) {
+    if (normalizeRoutePath(item.href) === current) {
+      return item.href;
+    }
+  }
+
+  let bestHref: string | null = null;
+  let bestLength = -1;
+
+  for (const item of items) {
+    const normalizedHref = normalizeRoutePath(item.href);
+    if (PORTAL_ROOT_PATHS.has(normalizedHref) || normalizedHref === "/") {
+      continue;
+    }
+    if (
+      current.startsWith(`${normalizedHref}/`) &&
+      normalizedHref.length > bestLength
+    ) {
+      bestHref = item.href;
+      bestLength = normalizedHref.length;
+    }
+  }
+
+  return bestHref;
+}
+
 export function sanitizeNextPath(
   nextParam: string | null | undefined
 ): string | null {

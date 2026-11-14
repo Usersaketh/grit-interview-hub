@@ -1,122 +1,161 @@
 import { describe, expect, it, vi } from "vitest";
-import { sendInterviewerInvitationEmail } from "@backend/lib/email/mailer";
-import { buildInterviewerInvitationEmail } from "@backend/lib/email/templates";
-import { createInterviewerInvitation } from "@backend/modules/invitations/service";
+import {
+  buildInvitationRedirectUrl,
+  createInterviewerInvitation,
+} from "@backend/modules/invitations/service";
 
-describe("transactional invitation email delivery", () => {
-  it("builds HTML and plain-text invitation emails with role, link, and safe HTML escaping", () => {
-    const rendered = buildInterviewerInvitationEmail({
-      recipientEmail: "assessor@institution.edu",
-      recipientName: "Dr. Kavya <Staff>",
-      inviterName: "Operations Lead",
-      title: "Senior Architect",
-      defaultTimezone: "Asia/Kolkata",
-      expertiseTags: ["Distributed Systems", "PostgreSQL"],
-      expiresAt: "2026-12-01T10:00:00Z",
-      inviteUrl: "https://gritinterviewhub.vercel.app/invitations/accept?token=abc_123",
-    });
-
-    expect(rendered.subject).toContain("Interviewer");
-    expect(rendered.html).toContain("Dr. Kavya &lt;Staff&gt;");
-    expect(rendered.html).toContain(
-      "https://gritinterviewhub.vercel.app/invitations/accept?token=abc_123"
+describe("Supabase Auth interviewer invitation delivery", () => {
+  it("builds production and local Supabase Auth callback redirect URLs targeting invitation acceptance", () => {
+    const prod = buildInvitationRedirectUrl(
+      "inv-uuid-1",
+      "https://gritinterviewhub.vercel.app"
     );
-    expect(rendered.html).toContain("INTERVIEWER");
-    expect(rendered.html).toContain("Distributed Systems, PostgreSQL");
-    expect(rendered.text).toContain("Operations Lead");
-    expect(rendered.text).toContain(
-      "https://gritinterviewhub.vercel.app/invitations/accept?token=abc_123"
+    expect(prod).toBe(
+      "https://gritinterviewhub.vercel.app/auth/callback?next=%2Finvitations%2Faccept%3FinvitationId%3Dinv-uuid-1"
+    );
+
+    const local = buildInvitationRedirectUrl("inv-uuid-2", "http://localhost:3000/");
+    expect(local).toBe(
+      "http://localhost:3000/auth/callback?next=%2Finvitations%2Faccept%3FinvitationId%3Dinv-uuid-2"
     );
   });
 
-  it("reports not_configured cleanly without claiming email was sent when provider env vars are missing", async () => {
-    const result = await sendInterviewerInvitationEmail(
-      {
-        recipientEmail: "assessor@institution.edu",
-        defaultTimezone: "UTC",
-        expertiseTags: [],
-        expiresAt: "2026-12-01T10:00:00Z",
-        inviteUrl: "http://localhost:3000/invitations/accept?token=tok123",
+  it("dispatches inviteUserByEmail with redirectTo and assessor metadata when adminDb is configured", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        id: "11111111-1111-4111-8111-111111111111",
+        email: "assessor@institution.edu",
+        full_name: "Dr. Kavya Nair",
+        status: "PENDING",
       },
-      { env: {} }
-    );
-
-    expect(result.status).toBe("not_configured");
-    expect(result.provider).toBe("none");
-    expect(result.recipient).toBe("assessor@institution.edu");
-    expect(result.error).toContain("EMAIL_PROVIDER_API_KEY");
-  });
-
-  it("sends email via Resend when EMAIL_PROVIDER_API_KEY and EMAIL_FROM are set", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ id: "email_msg_42" }),
+      error: null,
+    });
+    const inviteUserByEmail = vi.fn().mockResolvedValue({
+      data: { user: { id: "auth-user-1" } },
+      error: null,
     });
 
-    const result = await sendInterviewerInvitationEmail(
+    const result = await createInterviewerInvitation(
+      { rpc },
       {
-        recipientEmail: "assessor@institution.edu",
-        recipientName: "Kavya Nair",
+        email: "assessor@institution.edu",
+        fullName: "Dr. Kavya Nair",
         defaultTimezone: "Asia/Kolkata",
-        expertiseTags: ["TypeScript"],
-        expiresAt: "2026-12-01T10:00:00Z",
-        inviteUrl: "https://gritinterviewhub.vercel.app/invitations/accept?token=xyz",
+        title: "Staff Reviewer",
+        expertiseTags: ["Distributed Systems", "PostgreSQL"],
+        expiresInDays: 7,
+        idempotencyKey: "22222222-2222-4222-8222-222222222222",
       },
+      "https://gritinterviewhub.vercel.app",
       {
-        env: {
-          EMAIL_PROVIDER_API_KEY: "re_test_key",
-          EMAIL_FROM: "GRIT Interview Hub <noreply@grit.example>",
-        },
-        fetchImpl: fetchMock as unknown as typeof fetch,
+        inviterName: "Operations Lead",
+        adminDb: { auth: { admin: { inviteUserByEmail } } },
       }
     );
 
-    expect(result).toEqual({
+    expect(result.tokenIssued).toBe(true);
+    expect(result.emailDelivery).toEqual({
       status: "sent",
-      provider: "resend",
+      provider: "supabase_auth",
       recipient: "assessor@institution.edu",
-      messageId: "email_msg_42",
+      deliveryKind: "invite",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.resend.com/emails");
-    const parsedBody = JSON.parse(String(init.body));
-    expect(parsedBody.to).toEqual(["assessor@institution.edu"]);
-    expect(parsedBody.from).toBe("GRIT Interview Hub <noreply@grit.example>");
+    expect(inviteUserByEmail).toHaveBeenCalledWith(
+      "assessor@institution.edu",
+      {
+        redirectTo:
+          "https://gritinterviewhub.vercel.app/auth/callback?next=%2Finvitations%2Faccept%3FinvitationId%3D11111111-1111-4111-8111-111111111111",
+        data: {
+          full_name: "Dr. Kavya Nair",
+          title: "Staff Reviewer",
+          default_timezone: "Asia/Kolkata",
+          expertise_tags: ["Distributed Systems", "PostgreSQL"],
+          expertise_tags_text: "Distributed Systems, PostgreSQL",
+          invited_by_name: "Operations Lead",
+          invitation_id: "11111111-1111-4111-8111-111111111111",
+        },
+      }
+    );
   });
 
-  it("returns failed status gracefully without throwing when provider responds with an error", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 422,
-      json: vi.fn().mockResolvedValue({ message: "Domain not verified" }),
+  it("falls back to signInWithOtp for already-registered Auth users so existing users receive a verification link", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        id: "33333333-3333-4333-8333-333333333333",
+        email: "existing.user@institution.edu",
+        status: "PENDING",
+      },
+      error: null,
+    });
+    const inviteUserByEmail = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "A user with this email address has already been registered" },
+    });
+    const signInWithOtp = vi.fn().mockResolvedValue({
+      data: {},
+      error: null,
     });
 
-    const result = await sendInterviewerInvitationEmail(
+    const result = await createInterviewerInvitation(
+      { rpc },
       {
-        recipientEmail: "assessor@institution.edu",
+        email: "existing.user@institution.edu",
         defaultTimezone: "UTC",
         expertiseTags: [],
-        expiresAt: "2026-12-01T10:00:00Z",
-        inviteUrl: "https://gritinterviewhub.vercel.app/invitations/accept?token=xyz",
+        expiresInDays: 7,
+        idempotencyKey: "44444444-4444-4444-8444-444444444444",
       },
+      "http://localhost:3000",
       {
-        env: {
-          EMAIL_PROVIDER_API_KEY: "re_test_key",
-          EMAIL_FROM: "noreply@grit.example",
-        },
-        fetchImpl: fetchMock as unknown as typeof fetch,
+        adminDb: { auth: { admin: { inviteUserByEmail } } },
+        otpClient: { auth: { signInWithOtp } },
       }
     );
 
-    expect(result.status).toBe("failed");
-    expect(result.provider).toBe("resend");
-    expect(result.error).toContain("Domain not verified");
+    expect(result.emailDelivery).toEqual({
+      status: "sent",
+      provider: "supabase_auth",
+      recipient: "existing.user@institution.edu",
+      deliveryKind: "magiclink_existing_user",
+    });
+    expect(signInWithOtp).toHaveBeenCalledWith({
+      email: "existing.user@institution.edu",
+      options: {
+        emailRedirectTo:
+          "http://localhost:3000/auth/callback?next=%2Finvitations%2Faccept%3FinvitationId%3D33333333-3333-4333-8333-333333333333",
+        shouldCreateUser: false,
+      },
+    });
   });
 
-  it("never sends a duplicate email or fabricates a token URL on idempotency replay", async () => {
-    const sendMock = vi.fn();
+  it("reports not_configured cleanly without throwing when adminDb is omitted", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        id: "55555555-5555-4555-8555-555555555555",
+        email: "assessor@institution.edu",
+        status: "PENDING",
+      },
+      error: null,
+    });
+
+    const result = await createInterviewerInvitation(
+      { rpc },
+      {
+        email: "assessor@institution.edu",
+        defaultTimezone: "UTC",
+        expertiseTags: [],
+        expiresInDays: 7,
+        idempotencyKey: "66666666-6666-4666-8666-666666666666",
+      },
+      "http://localhost:3000"
+    );
+
+    expect(result.emailDelivery?.status).toBe("not_configured");
+    expect(result.emailDelivery?.provider).toBe("none");
+  });
+
+  it("never sends a duplicate Supabase Auth email on idempotency replay", async () => {
+    const inviteUserByEmail = vi.fn();
     const rpc = vi.fn().mockResolvedValue({
       data: {
         id: "inv-existing",
@@ -135,18 +174,17 @@ describe("transactional invitation email delivery", () => {
         defaultTimezone: "UTC",
         expertiseTags: ["Systems"],
         expiresInDays: 7,
-        idempotencyKey: "11111111-1111-4111-8111-111111111111",
+        idempotencyKey: "77777777-7777-4777-8777-777777777777",
       },
       "https://gritinterviewhub.vercel.app",
       {
         inviterName: "Ops Staff",
-        sendEmail: sendMock,
+        adminDb: { auth: { admin: { inviteUserByEmail } } },
       }
     );
 
     expect(result.tokenIssued).toBe(false);
-    expect(result.inviteUrl).toBeNull();
     expect(result.emailDelivery).toBeNull();
-    expect(sendMock).not.toHaveBeenCalled();
+    expect(inviteUserByEmail).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>You're invited to become a GRIT Interviewer</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#050506;color:#f4f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#050506;padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background-color:#0b0b0e;border:1px solid #222229;border-radius:10px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px 28px;border-bottom:1px solid #1d1d24;">
+                <span style="display:inline-block;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9fb0ff;">GRIT INTERVIEW HUB · ASSESSOR INVITATION</span>
+                <h1 style="margin:10px 0 0 0;font-size:21px;line-height:1.3;font-weight:600;color:#f4f4f6;">
+                  You&apos;re invited to become a GRIT Interviewer
+                </h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px;font-size:14px;line-height:1.6;color:#c9cad1;">
+                <p style="margin:0 0 14px 0;">
+                  {{ if .Data.full_name }}Hi {{ .Data.full_name }},{{ else }}Hello,{{ end }}
+                </p>
+                <p style="margin:0 0 18px 0;">
+                  {{ if .Data.invited_by_name }}{{ .Data.invited_by_name }} has invited{{ else }}GRIT Operations has invited{{ end }} you to join <strong style="color:#f4f4f6;">GRIT Interview Hub</strong> as an accredited <strong style="color:#9fb0ff;">INTERVIEWER</strong>.
+                </p>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 22px 0;background-color:#111117;border:1px solid #222229;border-radius:6px;">
+                  <tr>
+                    <td style="padding:14px 16px;font-size:12px;line-height:1.6;color:#c9cad1;">
+                      <div><strong style="color:#f4f4f6;">Assigned Role:</strong> INTERVIEWER</div>
+                      {{ if .Data.title }}<div><strong style="color:#f4f4f6;">Assessor Title:</strong> {{ .Data.title }}</div>{{ end }}
+                      {{ if .Data.default_timezone }}<div><strong style="color:#f4f4f6;">Default Timezone:</strong> {{ .Data.default_timezone }}</div>{{ end }}
+                      {{ if .Data.expertise_tags_text }}<div><strong style="color:#f4f4f6;">Assessment Focus:</strong> {{ .Data.expertise_tags_text }}</div>{{ end }}
+                    </td>
+                  </tr>
+                </table>
+
+                <table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 22px 0;">
+                  <tr>
+                    <td style="border-radius:6px;background-color:#4f65f1;">
+                      <a href="{{ .ConfirmationURL }}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 20px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">
+                        Accept Invitation &amp; Onboard
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+
+                <p style="margin:0 0 8px 0;font-size:12px;color:#8c8d98;">
+                  If the button above does not work, copy and paste this link into your browser:
+                </p>
+                <p style="margin:0 0 18px 0;word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:#9fb0ff;">
+                  {{ .ConfirmationURL }}
+                </p>
+
+                <p style="margin:0;padding-top:16px;border-top:1px solid #1d1d24;font-size:12px;color:#8c8d98;">
+                  This invitation is strictly bound to your invited email address and expires automatically if unused. If you were not expecting this invitation, you can safely ignore this email.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

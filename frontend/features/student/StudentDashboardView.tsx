@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Award, Calendar, ShieldAlert } from "lucide-react";
+import { ArrowRight, Award, Calendar, Eye, MailCheck, ShieldAlert } from "lucide-react";
 import { AppShell } from "@frontend/components/AppShell";
 import {
   GritProgressionTrack,
@@ -252,13 +252,34 @@ export function StudentDashboardView() {
             : "Review your skill clearances, badge interview eligibility, scheduled interviews, and certification progress."
         }
         actions={
-          <Link
-            href="/student/interviews/book"
-            className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
-          >
-            <span>Book Interview</span>
-            <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
-          </Link>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Link
+              href="/student/journey-preview"
+              className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
+            >
+              <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Journey Preview (Demo)</span>
+            </Link>
+            <Link
+              href="/student/messages"
+              className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)]"
+            >
+              <MailCheck className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>
+                Messages
+                {(overview?.unreadNotificationsCount ?? 0) > 0
+                  ? ` (${overview?.unreadNotificationsCount} unread)`
+                  : ""}
+              </span>
+            </Link>
+            <Link
+              href="/student/interviews/book"
+              className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
+            >
+              <span>Book Interview</span>
+              <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+            </Link>
+          </div>
         }
       />
 

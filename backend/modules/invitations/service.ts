@@ -1,9 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
 import { AppError } from "@backend/lib/errors";
-import {
-  sendInterviewerInvitationEmail,
-  type EmailDeliveryResult,
-} from "@backend/lib/email/mailer";
 
 export type CreateInvitationInput = {
   email: string;
@@ -15,9 +11,18 @@ export type CreateInvitationInput = {
   idempotencyKey: string;
 };
 
+export type EmailDeliveryResult = {
+  status: "sent" | "not_configured" | "failed";
+  provider: "supabase_auth" | "none";
+  recipient: string;
+  deliveryKind?: "invite" | "magiclink_existing_user";
+  error?: string;
+};
+
 export type CreateInvitationOptions = {
   inviterName?: string | null;
-  sendEmail?: typeof sendInterviewerInvitationEmail;
+  adminDb?: any;
+  otpClient?: any;
 };
 
 export type RevokeInvitationInput = {
@@ -26,10 +31,12 @@ export type RevokeInvitationInput = {
 };
 
 export type AcceptInvitationInput = {
-  token: string;
+  invitationId: string;
   fullName?: string;
-  password?: string;
 };
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function generateInvitationToken(): string {
   return randomBytes(32).toString("base64url");
@@ -37,6 +44,29 @@ export function generateInvitationToken(): string {
 
 export function hashInvitationToken(rawToken: string): string {
   return createHash("sha256").update(rawToken.trim()).digest("hex");
+}
+
+export function buildInvitationRedirectUrl(
+  invitationId: string,
+  originUrl?: string
+): string {
+  const nextPath = `/invitations/accept?invitationId=${encodeURIComponent(invitationId)}`;
+  const callbackPath = `/auth/callback?next=${encodeURIComponent(nextPath)}`;
+  if (originUrl && originUrl.trim()) {
+    return `${originUrl.trim().replace(/\/$/, "")}${callbackPath}`;
+  }
+  return callbackPath;
+}
+
+function isAlreadyRegisteredAuthError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("already") ||
+    lower.includes("registered") ||
+    lower.includes("exists") ||
+    lower.includes("email_exists") ||
+    lower.includes("user_already_exists")
+  );
 }
 
 export function mapInvitationRpcError(error: { code?: string; message?: string }): AppError {
@@ -56,7 +86,7 @@ export function mapInvitationRpcError(error: { code?: string; message?: string }
     );
   }
   if (message.includes("invitation_not_found")) {
-    return new AppError("INVITATION_NOT_FOUND", 404, "Invitation not found or invalid token");
+    return new AppError("INVITATION_NOT_FOUND", 404, "Invitation not found");
   }
   if (message.includes("invitation_revoked")) {
     return new AppError("INVITATION_REVOKED", 409, "This invitation has been revoked");
@@ -96,15 +126,114 @@ export function mapInvitationRpcError(error: { code?: string; message?: string }
   return new AppError("INVITATION_FAILED", 400, "Invitation request could not be completed");
 }
 
+async function dispatchSupabaseAuthInvitation(params: {
+  adminDb?: any;
+  otpClient?: any;
+  recipientEmail: string;
+  redirectTo: string;
+  invitationId: string;
+  fullName?: string | null;
+  inviterName?: string | null;
+  title?: string | null;
+  defaultTimezone: string;
+  expertiseTags: string[];
+}): Promise<EmailDeliveryResult> {
+  const { adminDb, otpClient, recipientEmail, redirectTo } = params;
+
+  if (!adminDb?.auth?.admin?.inviteUserByEmail) {
+    return {
+      status: "not_configured",
+      provider: "none",
+      recipient: recipientEmail,
+      error:
+        "SUPABASE_SERVICE_ROLE_KEY is required on the server to send Supabase Auth invitation emails.",
+    };
+  }
+
+  const metadata = {
+    full_name: params.fullName?.trim() || null,
+    title: params.title?.trim() || null,
+    default_timezone: params.defaultTimezone,
+    expertise_tags: params.expertiseTags,
+    expertise_tags_text: params.expertiseTags.join(", "),
+    invited_by_name: params.inviterName?.trim() || null,
+    invitation_id: params.invitationId,
+  };
+
+  try {
+    const { error: inviteError } = await adminDb.auth.admin.inviteUserByEmail(
+      recipientEmail,
+      {
+        redirectTo,
+        data: metadata,
+      }
+    );
+
+    if (!inviteError) {
+      return {
+        status: "sent",
+        provider: "supabase_auth",
+        recipient: recipientEmail,
+        deliveryKind: "invite",
+      };
+    }
+
+    if (isAlreadyRegisteredAuthError(inviteError.message ?? "")) {
+      const otpAuth = otpClient?.auth?.signInWithOtp ? otpClient : adminDb;
+      const { error: otpError } = await otpAuth.auth.signInWithOtp({
+        email: recipientEmail,
+        options: {
+          emailRedirectTo: redirectTo,
+          shouldCreateUser: false,
+        },
+      });
+
+      if (!otpError) {
+        return {
+          status: "sent",
+          provider: "supabase_auth",
+          recipient: recipientEmail,
+          deliveryKind: "magiclink_existing_user",
+        };
+      }
+
+      return {
+        status: "failed",
+        provider: "supabase_auth",
+        recipient: recipientEmail,
+        deliveryKind: "magiclink_existing_user",
+        error: otpError.message || "Could not dispatch Supabase Auth invitation link to existing user.",
+      };
+    }
+
+    return {
+      status: "failed",
+      provider: "supabase_auth",
+      recipient: recipientEmail,
+      deliveryKind: "invite",
+      error: inviteError.message || "Supabase Auth could not send invitation email.",
+    };
+  } catch (err) {
+    return {
+      status: "failed",
+      provider: "supabase_auth",
+      recipient: recipientEmail,
+      deliveryKind: "invite",
+      error: err instanceof Error ? err.message : "Unexpected Supabase Auth invitation error.",
+    };
+  }
+}
+
 export async function createInterviewerInvitation(
   db: any,
   input: CreateInvitationInput,
   originUrl?: string,
   options: CreateInvitationOptions = {}
 ) {
-  const rawToken = generateInvitationToken();
-  const tokenHash = hashInvitationToken(rawToken);
-  const expiresAt = new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+  const internalTokenHash = hashInvitationToken(generateInvitationToken());
+  const expiresAt = new Date(
+    Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000
+  ).toISOString();
   const normalizedEmail = input.email.trim().toLowerCase();
 
   const { data, error } = await db.rpc("create_interviewer_invitation", {
@@ -113,7 +242,7 @@ export async function createInterviewerInvitation(
     p_default_timezone: input.defaultTimezone.trim(),
     p_title: input.title?.trim() ?? null,
     p_expertise_tags: input.expertiseTags,
-    p_token_hash: tokenHash,
+    p_token_hash: internalTokenHash,
     p_expires_at: expiresAt,
     p_idempotency_key: input.idempotencyKey,
   });
@@ -123,35 +252,29 @@ export async function createInterviewerInvitation(
   }
 
   // On an idempotency replay, Postgres returns the existing invitation row whose token_hash
-  // corresponds to the original call rather than the freshly generated tokenHash.
+  // differs from the freshly generated hash, preventing duplicate email delivery.
   const isFreshCreation =
-    !data?.token_hash || data.token_hash === tokenHash;
-
-  const acceptPath = `/invitations/accept?token=${encodeURIComponent(rawToken)}`;
-  const inviteUrl = isFreshCreation
-    ? originUrl
-      ? `${originUrl.replace(/\/$/, "")}${acceptPath}`
-      : acceptPath
-    : null;
+    !data?.token_hash || data.token_hash === internalTokenHash;
 
   let emailDelivery: EmailDeliveryResult | null = null;
-  if (isFreshCreation && inviteUrl) {
-    const sendFn = options.sendEmail ?? sendInterviewerInvitationEmail;
-    emailDelivery = await sendFn({
+  if (isFreshCreation && data?.id) {
+    const redirectTo = buildInvitationRedirectUrl(data.id, originUrl);
+    emailDelivery = await dispatchSupabaseAuthInvitation({
+      adminDb: options.adminDb,
+      otpClient: options.otpClient,
       recipientEmail: normalizedEmail,
-      recipientName: input.fullName?.trim() ?? data?.full_name ?? null,
+      redirectTo,
+      invitationId: data.id,
+      fullName: input.fullName?.trim() ?? data?.full_name ?? null,
       inviterName: options.inviterName ?? null,
       title: input.title?.trim() ?? data?.title ?? null,
       defaultTimezone: input.defaultTimezone.trim(),
       expertiseTags: input.expertiseTags,
-      expiresAt: data?.expires_at ?? expiresAt,
-      inviteUrl,
     });
   }
 
   return {
     invitation: data,
-    inviteUrl,
     tokenIssued: isFreshCreation,
     emailDelivery,
   };
@@ -177,16 +300,33 @@ export async function revokeInterviewerInvitation(
   return data;
 }
 
-export async function verifyInvitationToken(adminDb: any, rawToken: string) {
-  if (!rawToken || rawToken.trim().length < 16) {
-    throw new AppError("INVALID_INVITATION_TOKEN", 422, "Invitation token format is invalid");
+export async function verifyInvitationForSession(
+  userDb: any,
+  adminDb: any,
+  invitationId: string
+) {
+  if (!invitationId || !UUID_REGEX.test(invitationId.trim())) {
+    throw new AppError("VALIDATION_ERROR", 422, "Valid invitation ID is required");
   }
 
-  const tokenHash = hashInvitationToken(rawToken);
+  const {
+    data: { user: currentUser },
+  } = await userDb.auth.getUser();
+
+  if (!currentUser?.email) {
+    throw new AppError(
+      "UNAUTHENTICATED",
+      401,
+      "Open the invitation link from your email or sign in with your invited email address."
+    );
+  }
+
   const { data: inv, error } = await adminDb
     .from("interviewer_invitations")
-    .select("id, email, full_name, default_timezone, title, expertise_tags, invited_role, status, expires_at")
-    .eq("token_hash", tokenHash)
+    .select(
+      "id, email, full_name, default_timezone, title, expertise_tags, invited_role, status, expires_at"
+    )
+    .eq("id", invitationId.trim())
     .maybeSingle();
 
   if (error) {
@@ -196,7 +336,19 @@ export async function verifyInvitationToken(adminDb: any, rawToken: string) {
     throw new AppError("INVITATION_NOT_FOUND", 404, "Invitation not found or invalid");
   }
 
-  const isExpired = inv.status === "EXPIRED" || (inv.status === "PENDING" && new Date(inv.expires_at) <= new Date());
+  const currentEmail = String(currentUser.email).trim().toLowerCase();
+  const invitedEmail = String(inv.email).trim().toLowerCase();
+  if (currentEmail !== invitedEmail) {
+    throw new AppError(
+      "INVITATION_EMAIL_MISMATCH",
+      403,
+      `Signed in as ${currentEmail}, which does not match this invitation's email address.`
+    );
+  }
+
+  const isExpired =
+    inv.status === "EXPIRED" ||
+    (inv.status === "PENDING" && new Date(inv.expires_at) <= new Date());
   const effectiveStatus = isExpired ? "EXPIRED" : inv.status;
 
   if (effectiveStatus === "EXPIRED" && inv.status === "PENDING") {
@@ -219,30 +371,55 @@ export async function verifyInvitationToken(adminDb: any, rawToken: string) {
   };
 }
 
-export async function acceptInterviewerInvitation(
+export async function acceptInterviewerInvitationForSession(
   userDb: any,
   adminDb: any,
   input: AcceptInvitationInput
 ) {
-  const tokenHash = hashInvitationToken(input.token);
+  const {
+    data: { user: currentUser },
+  } = await userDb.auth.getUser();
+
+  if (!currentUser?.email) {
+    throw new AppError(
+      "UNAUTHENTICATED",
+      401,
+      "Sign in or open your Supabase Auth invitation email link before accepting."
+    );
+  }
 
   const { data: inv, error: invError } = await adminDb
     .from("interviewer_invitations")
     .select("id, email, full_name, default_timezone, title, status, expires_at")
-    .eq("token_hash", tokenHash)
+    .eq("id", input.invitationId)
     .maybeSingle();
 
   if (invError) {
     throw new AppError("INVITATION_LOOKUP_FAILED", 500, "Could not look up invitation");
   }
   if (!inv) {
-    throw new AppError("INVITATION_NOT_FOUND", 404, "Invitation not found or invalid token");
+    throw new AppError("INVITATION_NOT_FOUND", 404, "Invitation not found");
   }
+
+  const currentEmail = String(currentUser.email).trim().toLowerCase();
+  const invitedEmail = String(inv.email).trim().toLowerCase();
+  if (currentEmail !== invitedEmail) {
+    throw new AppError(
+      "INVITATION_EMAIL_MISMATCH",
+      403,
+      `Signed in as ${currentEmail}, which does not match this invitation's email address.`
+    );
+  }
+
   if (inv.status === "REVOKED") {
     throw new AppError("INVITATION_REVOKED", 409, "This invitation has been revoked");
   }
   if (inv.status === "ACCEPTED") {
-    throw new AppError("INVITATION_ALREADY_ACCEPTED", 409, "This invitation has already been accepted");
+    throw new AppError(
+      "INVITATION_ALREADY_ACCEPTED",
+      409,
+      "This invitation has already been accepted"
+    );
   }
   if (inv.status === "EXPIRED" || new Date(inv.expires_at) <= new Date()) {
     await adminDb
@@ -252,99 +429,13 @@ export async function acceptInterviewerInvitation(
     throw new AppError("INVITATION_EXPIRED", 409, "This invitation has expired");
   }
 
-  const invitedEmail = String(inv.email).trim().toLowerCase();
-  const {
-    data: { user: currentUser },
-  } = await userDb.auth.getUser();
-
-  if (currentUser) {
-    const currentEmail = String(currentUser.email ?? "").trim().toLowerCase();
-    if (currentEmail !== invitedEmail) {
-      throw new AppError(
-        "INVITATION_EMAIL_MISMATCH",
-        403,
-        `Signed in as ${currentEmail}, but this invitation belongs to ${invitedEmail}. Sign out first or switch accounts.`
-      );
-    }
-
-    const { data: interviewer, error: rpcError } = await userDb.rpc("accept_interviewer_invitation", {
-      p_token_hash: tokenHash,
+  const { data: interviewer, error: rpcError } = await userDb.rpc(
+    "accept_interviewer_invitation_by_id",
+    {
+      p_invitation_id: input.invitationId,
       p_full_name: input.fullName?.trim() ?? null,
-    });
-
-    if (rpcError) throw mapInvitationRpcError(rpcError);
-
-    return {
-      interviewer,
-      email: invitedEmail,
-      role: "INTERVIEWER" as const,
-      signedIn: true,
-    };
-  }
-
-  // Unauthenticated acceptance path: verify no existing account first to never reset/take over passwords.
-  const { data: existingProfile } = await adminDb
-    .from("profiles")
-    .select("id")
-    .eq("email", invitedEmail)
-    .maybeSingle();
-
-  if (existingProfile) {
-    throw new AppError(
-      "ACCOUNT_EXISTS_SIGN_IN_REQUIRED",
-      409,
-      "An account already exists for this email. Sign in with your existing password to accept this invitation."
-    );
-  }
-
-  if (!input.password) {
-    throw new AppError(
-      "PASSWORD_REQUIRED",
-      422,
-      "Create a password to set up your new interviewer account"
-    );
-  }
-
-  const displayName =
-    input.fullName?.trim() || inv.full_name || invitedEmail.split("@")[0];
-
-  const { data: created, error: createError } = await adminDb.auth.admin.createUser({
-    email: invitedEmail,
-    password: input.password,
-    email_confirm: true,
-    app_metadata: { managed_provision: "true" },
-    user_metadata: { full_name: displayName },
-  });
-
-  if (createError || !created?.user) {
-    const msg = (createError?.message ?? "").toLowerCase();
-    if (msg.includes("already") || msg.includes("registered") || msg.includes("exists")) {
-      throw new AppError(
-        "ACCOUNT_EXISTS_SIGN_IN_REQUIRED",
-        409,
-        "An account already exists for this email. Sign in with your existing password to accept this invitation."
-      );
     }
-    throw new AppError("INVITATION_ACCEPT_FAILED", 400, createError?.message || "Failed to provision interviewer account");
-  }
-
-  const { error: signInError } = await userDb.auth.signInWithPassword({
-    email: invitedEmail,
-    password: input.password,
-  });
-
-  if (signInError) {
-    throw new AppError(
-      "SIGN_IN_FAILED",
-      500,
-      "Account was created, please sign in on the login page to complete invitation acceptance"
-    );
-  }
-
-  const { data: interviewer, error: rpcError } = await userDb.rpc("accept_interviewer_invitation", {
-    p_token_hash: tokenHash,
-    p_full_name: displayName,
-  });
+  );
 
   if (rpcError) throw mapInvitationRpcError(rpcError);
 

@@ -11,8 +11,8 @@ export const runtime = "nodejs";
 
 /**
  * Aggregated single-round-trip student workspace bootstrap endpoint.
- * Preserves RLS + student role enforcement while eliminating sequential client waterfalls
- * and per-badge eligibility N+1 HTTP requests.
+ * Preserves RLS + student role enforcement while returning tracks, badges, skills,
+ * eligibility decisions, interviews, malpractice status, and unread message count.
  */
 export async function GET() {
   try {
@@ -29,15 +29,28 @@ export async function GET() {
     }
 
     const [
+      tracksResult,
+      skillsResult,
       badgesResult,
       requiredSkillsResult,
       skillProgressResult,
       interviewsResult,
       malpracticeRecords,
+      unreadNotificationsResult,
     ] = await Promise.all([
       db
+        .from("tracks")
+        .select("id, external_id, name, description, is_active")
+        .eq("is_active", true)
+        .order("name", { ascending: true }),
+      db
+        .from("skills")
+        .select("id, external_id, name")
+        .order("name", { ascending: true }),
+      db
         .from("badges")
-        .select("id, track_id, external_id, name, level, is_active")
+        .select("id, track_id, external_id, name, level, description, is_active")
+        .order("level", { ascending: true })
         .order("name", { ascending: true }),
       db
         .from("badge_required_skills")
@@ -52,13 +65,22 @@ export async function GET() {
         .eq("student_id", student.id)
         .order("starts_at", { ascending: false }),
       getStudentMalpracticeStatus(db),
+      db
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .is("read_at", null),
     ]);
 
+    if (tracksResult.error) throw tracksResult.error;
+    if (skillsResult.error) throw skillsResult.error;
     if (badgesResult.error) throw badgesResult.error;
     if (requiredSkillsResult.error) throw requiredSkillsResult.error;
     if (skillProgressResult.error) throw skillProgressResult.error;
     if (interviewsResult.error) throw interviewsResult.error;
 
+    const tracks = tracksResult.data ?? [];
+    const skills = skillsResult.data ?? [];
     const badges = badgesResult.data ?? [];
     const requiredSkills = requiredSkillsResult.data ?? [];
     const skillProgress = skillProgressResult.data ?? [];
@@ -97,6 +119,8 @@ export async function GET() {
     return NextResponse.json({
       data: {
         student,
+        tracks,
+        skills,
         badges,
         requiredSkills,
         skillProgress,
@@ -106,6 +130,7 @@ export async function GET() {
           studentId: student.id,
           records: malpracticeRecords ?? [],
         },
+        unreadNotificationsCount: unreadNotificationsResult.count ?? 0,
       },
     });
   } catch (error) {

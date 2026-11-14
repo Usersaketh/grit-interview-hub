@@ -15,6 +15,8 @@ import {
   LogOut,
   Mail,
   Menu,
+  MessageSquareText,
+  Presentation,
   ShieldAlert,
   ShieldCheck,
   Terminal,
@@ -25,7 +27,10 @@ import { useAuth } from "@frontend/hooks/useAuth";
 import { useToast } from "@frontend/hooks/useToast";
 import { ThemeSwitch } from "@frontend/components/ThemeSwitch";
 import { SectionSkeleton } from "@frontend/components/SurfaceStates";
-import { resolvePortalRedirect } from "@frontend/lib/domain";
+import {
+  resolveActiveNavHref,
+  resolvePortalRedirect,
+} from "@frontend/lib/domain";
 import type { AppRole } from "@frontend/types/api";
 
 interface NavItem {
@@ -49,6 +54,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Book Interview", href: "/student/interviews/book", icon: CalendarClock },
       { label: "My Interviews", href: "/student/interviews", icon: Calendar },
       { label: "My Badges", href: "/student/badges", icon: Award },
+      { label: "Messages", href: "/student/messages", icon: MessageSquareText },
       { label: "Malpractice Status", href: "/student/malpractice", icon: ShieldAlert },
     ],
   },
@@ -173,48 +179,46 @@ export function AppShell({
 
   const renderNavLinks = (onNavigate?: () => void) => (
     <div className="space-y-6">
-      {visibleSections.map((section) => (
-        <div key={section.title}>
-          <p className="mb-2 px-3 font-mono text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">
-            {section.title}
-          </p>
-          <ul className="space-y-0.5">
-            {section.items.map((item) => {
-              const Icon = item.icon;
-              const isRoot =
-                item.href === "/student" ||
-                item.href === "/interviewer" ||
-                item.href === "/operations";
-              const active = isRoot
-                ? pathname === item.href
-                : pathname === item.href || pathname.startsWith(`${item.href}/`);
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    onClick={onNavigate}
-                    className={`group flex min-h-9 items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] ${
-                      active
-                        ? "bg-[var(--accent-soft)] text-[var(--accent-text)] shadow-[inset_2px_0_0_var(--accent-primary)]"
-                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
-                    }`}
-                  >
-                    <Icon
-                      className={`h-4 w-4 shrink-0 transition-colors ${
+      {visibleSections.map((section) => {
+        const activeHref = resolveActiveNavHref(pathname, section.items);
+        return (
+          <div key={section.title}>
+            <p className="mb-2 px-3 font-mono text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+              {section.title}
+            </p>
+            <ul className="space-y-0.5">
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                const active = activeHref === item.href;
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      onClick={onNavigate}
+                      aria-current={active ? "page" : undefined}
+                      className={`group flex min-h-9 items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] ${
                         active
-                          ? "text-[var(--accent-primary)]"
-                          : "text-[var(--text-muted)] group-hover:text-[var(--text-primary)]"
+                          ? "bg-[var(--accent-soft)] text-[var(--accent-text)] shadow-[inset_2px_0_0_var(--accent-primary)]"
+                          : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
                       }`}
-                      aria-hidden="true"
-                    />
-                    <span className="truncate">{item.label}</span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
+                    >
+                      <Icon
+                        className={`h-4 w-4 shrink-0 transition-colors ${
+                          active
+                            ? "text-[var(--accent-primary)]"
+                            : "text-[var(--text-muted)] group-hover:text-[var(--text-primary)]"
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
     </div>
   );
 
@@ -348,6 +352,22 @@ export function AppShell({
           </div>
 
           <div className="flex shrink-0 items-center gap-2.5">
+            {profile && profile.roles.includes("STUDENT") ? (
+              <Link
+                href="/student/journey-preview"
+                aria-current={
+                  pathname === "/student/journey-preview" ? "page" : undefined
+                }
+                className={`hidden min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-medium transition-colors sm:inline-flex ${
+                  pathname === "/student/journey-preview"
+                    ? "border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                    : "border-[var(--border-hairline)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                <Presentation className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>Journey Preview</span>
+              </Link>
+            ) : null}
             <ThemeSwitch />
             {profile ? (
               <button

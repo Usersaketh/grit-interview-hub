@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  LogOut,
   MailCheck,
   Terminal,
 } from "lucide-react";
@@ -20,28 +21,31 @@ import { useToast } from "@frontend/hooks/useToast";
 import {
   formatTimestamp,
   getInvitationStatusMeta,
+  isValidUuid,
 } from "@frontend/lib/domain";
 import {
   ApiClientError,
   formatApiErrorMessage,
 } from "@frontend/services/apiClient";
 import {
-  acceptInvitationToken,
-  verifyInvitationToken,
+  acceptInvitationById,
+  verifyInvitationById,
 } from "@frontend/services/hubApi";
+import { getSupabaseBrowserClient } from "@frontend/services/supabaseBrowser";
 import type { InvitationVerifyInfo } from "@frontend/types/api";
 
 export function AcceptInvitationView() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const token = searchParams.get("token")?.trim() ?? "";
+  const invitationId = searchParams.get("invitationId")?.trim() ?? "";
 
-  const { profile, refreshProfile } = useAuth();
+  const { profile, loading: authLoading, refreshProfile, signOut } = useAuth();
   const { pushToast } = useToast();
 
   const [inviteInfo, setInviteInfo] = useState<InvitationVerifyInfo | null>(null);
   const [verifying, setVerifying] = useState(true);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [verifyErrorCode, setVerifyErrorCode] = useState<string | null>(null);
 
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
@@ -49,32 +53,54 @@ export function AcceptInvitationView() {
   const [showPassword, setShowPassword] = useState(false);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [accountExistsError, setAccountExistsError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
+
+  const loginRedirectHref = invitationId
+    ? `/login?next=${encodeURIComponent(`/invitations/accept?invitationId=${invitationId}`)}`
+    : "/login";
 
   const loadVerification = useCallback(async () => {
-    if (!token) {
-      setVerifyError("No invitation token was supplied in the URL.");
+    if (authLoading) return;
+
+    if (!invitationId || !isValidUuid(invitationId)) {
+      setVerifyError("No valid invitation identifier was supplied in this link.");
+      setVerifyErrorCode("VALIDATION_ERROR");
       setVerifying(false);
       return;
     }
+
+    if (!profile) {
+      setInviteInfo(null);
+      setVerifyError(null);
+      setVerifyErrorCode(null);
+      setVerifying(false);
+      return;
+    }
+
     setVerifying(true);
     setVerifyError(null);
+    setVerifyErrorCode(null);
     try {
-      const info = await verifyInvitationToken(token);
+      const info = await verifyInvitationById(invitationId);
       setInviteInfo(info);
       if (info.fullName) setFullName(info.fullName);
     } catch (err) {
       setVerifyError(formatApiErrorMessage(err));
+      setVerifyErrorCode(err instanceof ApiClientError ? err.code : null);
     } finally {
       setVerifying(false);
     }
-  }, [token]);
+  }, [authLoading, invitationId, profile]);
 
   useEffect(() => {
     void loadVerification();
   }, [loadVerification]);
+
+  // Newly invited Supabase Auth users arrive signed in with zero application roles yet
+  // and need to set a password for future direct logins.
+  const needsPasswordSetup = Boolean(profile && profile.roles.length === 0);
 
   const emailMatchesSignedIn = Boolean(
     profile &&
@@ -82,13 +108,22 @@ export function AcceptInvitationView() {
       profile.email.trim().toLowerCase() === inviteInfo.email.trim().toLowerCase()
   );
 
+  const handleSwitchAccount = async () => {
+    setSwitchingAccount(true);
+    try {
+      await signOut();
+      router.push(loginRedirectHref);
+    } finally {
+      setSwitchingAccount(false);
+    }
+  };
+
   const handleAccept = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!inviteInfo) return;
+    if (!inviteInfo || !profile) return;
     setSubmitError(null);
-    setAccountExistsError(false);
 
-    if (!profile) {
+    if (needsPasswordSetup) {
       if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
         setSubmitError(
           "Create a password of at least 8 characters with letters and numbers."
@@ -103,10 +138,27 @@ export function AcceptInvitationView() {
 
     setSubmitting(true);
     try {
-      await acceptInvitationToken({
-        token,
+      if (needsPasswordSetup) {
+        const supabase = getSupabaseBrowserClient();
+        if (!supabase) {
+          setSubmitError("Supabase authentication is not configured.");
+          setSubmitting(false);
+          return;
+        }
+        const { error: pwError } = await supabase.auth.updateUser({
+          password,
+          data: fullName.trim() ? { full_name: fullName.trim() } : undefined,
+        });
+        if (pwError) {
+          setSubmitError(pwError.message || "Could not save your password.");
+          setSubmitting(false);
+          return;
+        }
+      }
+
+      await acceptInvitationById({
+        invitationId,
         ...(fullName.trim() ? { fullName: fullName.trim() } : {}),
-        ...(!profile && password ? { password } : {}),
       });
 
       await refreshProfile({ silent: true, force: true });
@@ -118,12 +170,6 @@ export function AcceptInvitationView() {
       });
       router.replace("/interviewer");
     } catch (err) {
-      if (
-        err instanceof ApiClientError &&
-        err.code === "ACCOUNT_EXISTS_SIGN_IN_REQUIRED"
-      ) {
-        setAccountExistsError(true);
-      }
       setSubmitError(formatApiErrorMessage(err));
     } finally {
       setSubmitting(false);
@@ -161,10 +207,36 @@ export function AcceptInvitationView() {
             </div>
           </div>
 
-          {verifying ? (
+          {authLoading || verifying ? (
             <div className="flex items-center gap-2.5 py-4 text-sm text-[var(--text-secondary)]">
               <Loader2 className="h-4 w-4 animate-spin text-[var(--accent-primary)]" aria-hidden="true" />
-              <span>Verifying invitation token...</span>
+              <span>Verifying invitation session...</span>
+            </div>
+          ) : !profile ? (
+            <div className="space-y-4">
+              <div className="rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-4 text-sm text-[var(--text-secondary)]">
+                <p className="font-medium text-[var(--text-primary)]">
+                  Verified Supabase Auth session required
+                </p>
+                <p className="mt-1.5 text-xs leading-relaxed">
+                  Open the invitation link directly from your Supabase Auth email, or sign in with your invited email address below to accept your interviewer role.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2.5">
+                <Link
+                  href={loginRedirectHref}
+                  className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                >
+                  <span>Sign in with Invited Email</span>
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+                <Link
+                  href="/"
+                  className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md border border-[var(--border-hairline)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                >
+                  Return Home
+                </Link>
+              </div>
             </div>
           ) : verifyError || !inviteInfo ? (
             <div className="space-y-4">
@@ -176,18 +248,36 @@ export function AcceptInvitationView() {
                 <div className="space-y-1">
                   <p className="font-medium">{verifyError ?? "Invalid invitation link."}</p>
                   <p className="text-xs text-[var(--text-secondary)]">
-                    Invitation links are single-use and expire automatically. If you already activated your interviewer account, sign in below. Otherwise, ask your GRIT coordinator to issue a new invitation.
+                    {verifyErrorCode === "INVITATION_EMAIL_MISMATCH"
+                      ? `You are signed in as ${profile.email}. Sign out and open the invitation link using the invited email address.`
+                      : "Invitation links expire automatically or may have already been accepted. Ask your GRIT Operations coordinator to issue a new invitation if needed."}
                   </p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2.5">
-                <Link
-                  href="/login"
-                  className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
-                >
-                  <span>Sign in</span>
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </Link>
+                {verifyErrorCode === "INVITATION_EMAIL_MISMATCH" ? (
+                  <button
+                    type="button"
+                    disabled={switchingAccount}
+                    onClick={() => void handleSwitchAccount()}
+                    className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] disabled:opacity-60"
+                  >
+                    {switchingAccount ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <LogOut className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    <span>Sign Out &amp; Switch Account</span>
+                  </button>
+                ) : (
+                  <Link
+                    href="/login"
+                    className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                  >
+                    <span>Sign in</span>
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </Link>
+                )}
                 <Link
                   href="/"
                   className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md border border-[var(--border-hairline)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
@@ -282,15 +372,15 @@ export function AcceptInvitationView() {
                   </p>
                   {inviteInfo.status === "ACCEPTED" ? (
                     <Link
-                      href="/login"
+                      href="/interviewer"
                       className="inline-flex items-center gap-1.5 font-semibold text-[var(--accent-text)] hover:underline"
                     >
-                      <span>Sign in to Interviewer Portal</span>
+                      <span>Go to Interviewer Portal</span>
                       <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                     </Link>
                   ) : null}
                 </div>
-              ) : profile && !emailMatchesSignedIn ? (
+              ) : !emailMatchesSignedIn ? (
                 <div
                   role="alert"
                   className="space-y-3 rounded-md border border-[var(--status-warning)]/30 bg-[var(--status-warning-bg)] p-4 text-xs text-[var(--text-primary)]"
@@ -301,12 +391,14 @@ export function AcceptInvitationView() {
                     <strong>{inviteInfo.email}</strong>. Sign out before accepting
                     this invitation.
                   </p>
-                  <Link
-                    href={`/login?next=${encodeURIComponent(`/invitations/accept?token=${token}`)}`}
-                    className="inline-flex items-center font-medium text-[var(--accent-text)] hover:underline"
+                  <button
+                    type="button"
+                    disabled={switchingAccount}
+                    onClick={() => void handleSwitchAccount()}
+                    className="inline-flex items-center gap-1.5 font-medium text-[var(--accent-text)] hover:underline"
                   >
-                    Switch Account
-                  </Link>
+                    <span>Switch Account</span>
+                  </button>
                 </div>
               ) : (
                 <form onSubmit={handleAccept} noValidate className="space-y-4">
@@ -315,16 +407,7 @@ export function AcceptInvitationView() {
                       role="alert"
                       className="rounded-md border border-[var(--status-error)]/30 bg-[var(--status-error-bg)] p-3 text-xs text-[var(--status-error)]"
                     >
-                      <p>{submitError}</p>
-                      {accountExistsError ? (
-                        <Link
-                          href={`/login?next=${encodeURIComponent(`/invitations/accept?token=${token}`)}`}
-                          className="mt-2 inline-flex items-center gap-1 font-semibold underline"
-                        >
-                          <span>Sign in with your existing account</span>
-                          <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                        </Link>
-                      ) : null}
+                      {submitError}
                     </div>
                   ) : null}
 
@@ -345,14 +428,14 @@ export function AcceptInvitationView() {
                     />
                   </div>
 
-                  {!profile ? (
+                  {needsPasswordSetup ? (
                     <>
                       <div>
                         <label
                           htmlFor="invite-password"
                           className="mb-1.5 block text-xs font-medium text-[var(--text-primary)]"
                         >
-                          Create Password
+                          Create Password (for future sign-ins)
                         </label>
                         <div className="relative">
                           <input

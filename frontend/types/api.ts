@@ -62,12 +62,27 @@ export interface EligibilityDecision {
   reason: string;
 }
 
+export interface TrackSummary {
+  id: string;
+  external_id: string | null;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+}
+
+export interface SkillSummary {
+  id: string;
+  external_id: string | null;
+  name: string;
+}
+
 export interface BadgeSummary {
   id: string;
   track_id: string;
   external_id: string | null;
   name: string;
   level: string;
+  description?: string | null;
   is_active: boolean;
 }
 
@@ -320,15 +335,14 @@ export interface CreateInvitationPayload {
 
 export interface EmailDeliveryStatus {
   status: "sent" | "not_configured" | "failed";
-  provider: "resend" | "none";
+  provider: "supabase_auth" | "none";
   recipient: string;
-  messageId?: string;
+  deliveryKind?: "invite" | "magiclink_existing_user";
   error?: string;
 }
 
 export interface CreateInvitationResponse {
   invitation: InterviewerInvitationRecord;
-  inviteUrl: string | null;
   tokenIssued: boolean;
   emailDelivery?: EmailDeliveryStatus | null;
 }
@@ -346,9 +360,8 @@ export interface InvitationVerifyInfo {
 }
 
 export interface AcceptInvitationPayload {
-  token: string;
+  invitationId: string;
   fullName?: string;
-  password?: string;
 }
 
 export interface AcceptInvitationResponse {
@@ -529,6 +542,19 @@ export interface AuditLogPageResponse {
   offset: number;
 }
 
+export interface NotificationRecord {
+  id: string;
+  user_id: string;
+  type: string;
+  template_key: string;
+  delivery_channel: string;
+  delivery_status: string;
+  payload: Record<string, unknown>;
+  sent_at: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
 export interface StudentOverviewResponse {
   student: {
     id: string;
@@ -537,11 +563,14 @@ export interface StudentOverviewResponse {
     campus_ref: string | null;
     created_at: string;
   };
+  tracks: TrackSummary[];
+  skills: SkillSummary[];
   badges: BadgeSummary[];
   requiredSkills: BadgeRequiredSkill[];
   skillProgress: StudentSkillProgress[];
   eligibilities: Record<string, EligibilityDecision>;
   interviews: InterviewRecord[];
   malpracticeStatus: StudentMalpracticeStatusResponse;
+  unreadNotificationsCount: number;
 }
 

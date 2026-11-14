@@ -16,11 +16,12 @@
 5. **Configure the Supabase Signup Email Template** in Supabase Dashboard → Authentication → Emails → Templates → **Confirm signup**:
    - Copy the HTML from `Docs/email-templates/supabase-confirm-signup.html` and paste it into the template body (uses `{{ .ConfirmationURL }}`).
    - Set the subject to `Confirm your GRIT Interview Hub account`.
-6. **Configure Transactional Email for Interviewer Invitations** (recommended for production onboarding):
-   - Set `EMAIL_PROVIDER_API_KEY` (Resend API key) and `EMAIL_FROM` (verified sender such as `GRIT Interview Hub <noreply@yourdomain.com>`) in `.env.local` and Vercel environment variables.
-   - When configured, creating an interviewer invitation automatically emails the single-use `/invitations/accept?token=...` onboarding link. If unset, the Operations portal reports `not_configured` and provides the generated link for manual delivery without claiming an email was sent.
+6. **Configure the Supabase Interviewer Invitation Email Template** in Supabase Dashboard → Authentication → Emails → Templates → **Invite user**:
+   - Copy the HTML from `Docs/email-templates/supabase-invite-user.html` and paste it into the template body (uses `{{ .ConfirmationURL }}` and safe Go template variables).
+   - Set the subject to `You're invited to become a GRIT Interviewer`.
+   - Ensure `SUPABASE_SERVICE_ROLE_KEY` is configured on the server so Operations/Admin invitations trigger `supabase.auth.admin.inviteUserByEmail(...)` via Supabase's configured SMTP transport. (Do not modify existing SMTP credentials.)
 7. In Database → Replication, enable the documented tables if realtime is required; configure Realtime Authorization before exposing channels.
-8. Create a GitHub repository, commit this code, then import it into Vercel. Configure the exact same environment variables in Vercel (set `NEXT_PUBLIC_APP_URL=https://gritinterviewhub.vercel.app` and mark `SUPABASE_SERVICE_ROLE_KEY` and `EMAIL_PROVIDER_API_KEY` as sensitive) and deploy.
+8. Create a GitHub repository, commit this code, then import it into Vercel. Configure the exact same environment variables in Vercel (set `NEXT_PUBLIC_APP_URL=https://gritinterviewhub.vercel.app` and mark `SUPABASE_SERVICE_ROLE_KEY` as sensitive) and deploy.
 
 Run locally: `npm install`, `npm run dev`. Verify: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
 

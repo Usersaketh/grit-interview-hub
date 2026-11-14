@@ -32,6 +32,7 @@ import type {
 
 interface EnrichedBadgeCard {
   badge: BadgeSummary;
+  trackName: string;
   eligibility: EligibilityDecision | null;
   award: Extract<
     StudentMalpracticeStatusRow,
@@ -39,12 +40,21 @@ interface EnrichedBadgeCard {
   > | null;
   requiredCount: number;
   verifiedCount: number;
+  requiredSkillsDetail: Array<{
+    skillId: string;
+    skillName: string;
+    requiredLevel: number;
+    achievedLevel: number;
+    verified: boolean;
+  }>;
 }
 
 function buildBadgeCards(overview: StudentOverviewResponse): EnrichedBadgeCard[] {
   const progressMap = new Map(
     overview.skillProgress.map((p) => [p.skill_id, p])
   );
+  const trackMap = new Map((overview.tracks ?? []).map((t) => [t.id, t]));
+  const skillMap = new Map((overview.skills ?? []).map((s) => [s.id, s]));
   const now = new Date();
   const awards = overview.malpracticeStatus.records.filter(
     (
@@ -61,21 +71,32 @@ function buildBadgeCards(overview: StudentOverviewResponse): EnrichedBadgeCard[]
       const reqs = overview.requiredSkills.filter(
         (r) => r.badge_id === badge.id
       );
-      const verifiedCount = reqs.filter((r) => {
+      const requiredSkillsDetail = reqs.map((r) => {
         const p = progressMap.get(r.skill_id);
-        return (
+        const verified =
           Boolean(p?.verified_at) &&
           new Date(p!.verified_at!) <= now &&
-          p!.achieved_level >= r.required_level
-        );
-      }).length;
+          p!.achieved_level >= r.required_level;
+        return {
+          skillId: r.skill_id,
+          skillName: skillMap.get(r.skill_id)?.name ?? r.skill_id,
+          requiredLevel: r.required_level,
+          achievedLevel: p?.achieved_level ?? 0,
+          verified,
+        };
+      });
+      const verifiedCount = requiredSkillsDetail.filter(
+        (item) => item.verified
+      ).length;
 
       return {
         badge,
+        trackName: trackMap.get(badge.track_id)?.name ?? "GRIT Track",
         eligibility: overview.eligibilities[badge.id] ?? null,
         award: awards.find((a) => a.badgeId === badge.id) ?? null,
         requiredCount: reqs.length,
         verifiedCount,
+        requiredSkillsDetail,
       };
     });
 }
@@ -99,6 +120,7 @@ export function StudentBadgesView() {
       : true
   );
   const [error, setError] = useState<string | null>(null);
+  const [selectedTrackId, setSelectedTrackId] = useState<string>("ALL");
 
   const loadBadges = useCallback(
     async (force = false) => {
@@ -145,6 +167,18 @@ export function StudentBadgesView() {
     [overview]
   );
 
+  const tracks = useMemo(() => overview?.tracks ?? [], [overview?.tracks]);
+
+  const filteredCards = useMemo(() => {
+    if (selectedTrackId === "ALL") return cards;
+    return cards.filter((c) => c.badge.track_id === selectedTrackId);
+  }, [cards, selectedTrackId]);
+
+  const selectedTrack = useMemo(
+    () => tracks.find((t) => t.id === selectedTrackId) ?? null,
+    [selectedTrackId, tracks]
+  );
+
   return (
     <AppShell allowedRoles={["STUDENT"]} sectionLabel="Student Portal">
       <PageHeader
@@ -153,7 +187,7 @@ export function StudentBadgesView() {
           { label: "My Badges" },
         ]}
         title="My Badges &amp; Certifications"
-        description="A passing interview creates a pending certification record until an administrator approves the official badge award."
+        description="Browse certification tracks, inspect required skills, and verify when a passing interview has received final badge approval."
       />
 
       {loading ? (
@@ -166,107 +200,194 @@ export function StudentBadgesView() {
           description="No active badges were returned from the GRIT catalog."
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {cards.map((item) => {
-            const certMeta = item.award?.awardStatus
-              ? getCertificationStatusMeta(item.award.awardStatus)
-              : null;
-            const pct =
-              item.requiredCount > 0
-                ? Math.round((item.verifiedCount / item.requiredCount) * 100)
-                : 0;
-
-            return (
-              <article
-                key={item.badge.id}
-                className="flex flex-col justify-between rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-5 transition-colors hover:border-[var(--border-strong)]"
+        <div className="space-y-5">
+          {tracks.length > 0 ? (
+            <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-4">
+              <div
+                role="tablist"
+                aria-label="Filter badges by track"
+                className="flex flex-wrap gap-1.5"
               >
-                <div>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                        {item.badge.name}
-                      </h2>
-                      <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
-                        {item.badge.level}
-                        {item.badge.external_id
-                          ? ` · ${item.badge.external_id}`
-                          : ""}
-                      </p>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={selectedTrackId === "ALL"}
+                  onClick={() => setSelectedTrackId("ALL")}
+                  className={`min-h-8 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    selectedTrackId === "ALL"
+                      ? "bg-[var(--accent-primary)] text-white"
+                      : "border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  All Tracks ({cards.length})
+                </button>
+                {tracks.map((track) => {
+                  const count = cards.filter(
+                    (c) => c.badge.track_id === track.id
+                  ).length;
+                  const active = selectedTrackId === track.id;
+                  return (
+                    <button
+                      key={track.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setSelectedTrackId(track.id)}
+                      className={`min-h-8 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                        active
+                          ? "bg-[var(--accent-primary)] text-white"
+                          : "border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
+                      }`}
+                    >
+                      {track.name} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+
+              {selectedTrack?.description ? (
+                <p className="mt-2.5 text-xs leading-relaxed text-[var(--text-secondary)]">
+                  {selectedTrack.description}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {filteredCards.map((item) => {
+              const certMeta = item.award?.awardStatus
+                ? getCertificationStatusMeta(item.award.awardStatus)
+                : null;
+              const pct =
+                item.requiredCount > 0
+                  ? Math.round((item.verifiedCount / item.requiredCount) * 100)
+                  : 0;
+
+              return (
+                <article
+                  key={item.badge.id}
+                  className="flex flex-col justify-between rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-5 transition-colors hover:border-[var(--border-strong)]"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--accent-text)]">
+                          {item.trackName}
+                        </p>
+                        <h2 className="mt-0.5 text-base font-semibold text-[var(--text-primary)]">
+                          {item.badge.name}
+                        </h2>
+                        <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+                          {item.badge.level}
+                          {item.badge.external_id
+                            ? ` · ${item.badge.external_id}`
+                            : ""}
+                        </p>
+                      </div>
+
+                      {certMeta ? (
+                        <StatusText label={certMeta.label} tone={certMeta.tone} />
+                      ) : item.eligibility?.eligible ? (
+                        <StatusText label="Eligible" tone="success" />
+                      ) : (
+                        <StatusText label="Locked" tone="neutral" />
+                      )}
                     </div>
 
-                    {certMeta ? (
-                      <StatusText label={certMeta.label} tone={certMeta.tone} />
-                    ) : item.eligibility?.eligible ? (
-                      <StatusText label="Eligible" tone="success" />
-                    ) : (
-                      <StatusText label="Locked" tone="neutral" />
-                    )}
+                    {item.badge.description ? (
+                      <p className="mt-2.5 text-xs leading-relaxed text-[var(--text-secondary)]">
+                        {item.badge.description}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-4 border-t border-[var(--border-hairline)] pt-3">
+                      <div className="flex items-center justify-between text-xs tabular-nums text-[var(--text-secondary)]">
+                        <span>
+                          Verified skills: {item.verifiedCount} /{" "}
+                          {item.requiredCount}
+                        </span>
+                        <span className="font-mono text-[11px] text-[var(--text-muted)]">
+                          {pct}%
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-sm bg-[var(--bg-elevated)]">
+                        <div
+                          className="h-full bg-[var(--accent-primary)] transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+
+                      {item.requiredSkillsDetail.length > 0 ? (
+                        <div className="mt-3 space-y-1">
+                          {item.requiredSkillsDetail.map((req) => (
+                            <div
+                              key={req.skillId}
+                              className="flex items-center justify-between gap-2 text-xs"
+                            >
+                              <span className="truncate text-[var(--text-secondary)]">
+                                {req.skillName}
+                              </span>
+                              <span
+                                className={`shrink-0 font-mono text-[11px] tabular-nums ${
+                                  req.verified
+                                    ? "text-[var(--status-success)]"
+                                    : "text-[var(--text-muted)]"
+                                }`}
+                              >
+                                L{req.achievedLevel}/L{req.requiredLevel}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {certMeta ? (
+                        <p className="mt-2.5 text-xs leading-relaxed text-[var(--text-secondary)]">
+                          {certMeta.description}
+                        </p>
+                      ) : item.eligibility ? (
+                        <p className="mt-2.5 text-xs leading-relaxed text-[var(--text-secondary)]">
+                          {item.eligibility.reason}
+                        </p>
+                      ) : null}
+
+                      {item.award?.awardedAt ? (
+                        <p className="mt-2 text-xs tabular-nums text-[var(--text-muted)]">
+                          Awarded: {formatTimestamp(item.award.awardedAt)}
+                        </p>
+                      ) : null}
+                      {item.award?.nullifiedAt ? (
+                        <p className="mt-1 text-xs tabular-nums text-[var(--status-error)]">
+                          Nullified: {formatTimestamp(item.award.nullifiedAt)}
+                        </p>
+                      ) : null}
+                      {item.award?.reinstatedAt ? (
+                        <p className="mt-1 text-xs tabular-nums text-[var(--status-success)]">
+                          Reinstated: {formatTimestamp(item.award.reinstatedAt)}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="mt-4 border-t border-[var(--border-hairline)] pt-3">
-                    <div className="flex items-center justify-between text-xs tabular-nums text-[var(--text-secondary)]">
-                      <span>
-                        Verified skills: {item.verifiedCount} /{" "}
-                        {item.requiredCount}
-                      </span>
+                    {item.eligibility?.eligible && !certMeta ? (
+                      <Link
+                        href={`/student/interviews/book?badgeId=${item.badge.id}`}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
+                      >
+                        <span>Book Certification Interview</span>
+                        <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Link>
+                    ) : (
                       <span className="font-mono text-[11px] text-[var(--text-muted)]">
-                        {pct}%
+                        {item.badge.external_id ?? item.badge.id}
                       </span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-sm bg-[var(--bg-elevated)]">
-                      <div
-                        className="h-full bg-[var(--accent-primary)] transition-all"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-
-                    {certMeta ? (
-                      <p className="mt-2.5 text-xs leading-relaxed text-[var(--text-secondary)]">
-                        {certMeta.description}
-                      </p>
-                    ) : item.eligibility ? (
-                      <p className="mt-2.5 text-xs leading-relaxed text-[var(--text-secondary)]">
-                        {item.eligibility.reason}
-                      </p>
-                    ) : null}
-
-                    {item.award?.awardedAt ? (
-                      <p className="mt-2 text-xs tabular-nums text-[var(--text-muted)]">
-                        Awarded: {formatTimestamp(item.award.awardedAt)}
-                      </p>
-                    ) : null}
-                    {item.award?.nullifiedAt ? (
-                      <p className="mt-1 text-xs tabular-nums text-[var(--status-error)]">
-                        Nullified: {formatTimestamp(item.award.nullifiedAt)}
-                      </p>
-                    ) : null}
-                    {item.award?.reinstatedAt ? (
-                      <p className="mt-1 text-xs tabular-nums text-[var(--status-success)]">
-                        Reinstated: {formatTimestamp(item.award.reinstatedAt)}
-                      </p>
-                    ) : null}
+                    )}
                   </div>
-                </div>
-
-                <div className="mt-4 border-t border-[var(--border-hairline)] pt-3">
-                  {item.eligibility?.eligible && !certMeta ? (
-                    <Link
-                      href={`/student/interviews/book?badgeId=${item.badge.id}`}
-                      className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-[var(--accent-text)] hover:underline"
-                    >
-                      <span>Book Certification Interview</span>
-                      <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                    </Link>
-                  ) : (
-                    <span className="font-mono text-[11px] text-[var(--text-muted)]">
-                      ID: {item.badge.id}
-                    </span>
-                  )}
-                </div>
-              </article>
-            );
-          })}
+                </article>
+              );
+            })}
+          </div>
         </div>
       )}
     </AppShell>

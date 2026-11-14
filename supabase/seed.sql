@@ -30,30 +30,43 @@ values
  ('20000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000003','Asia/Kolkata','Principal Full Stack Assessor','Leads technical capability evaluations across Full Stack Foundations, JavaScript runtime internals, and relational data modeling.',array['Full Stack Development','JavaScript','PostgreSQL'])
 on conflict (user_id) do nothing;
 
-insert into public.tracks(id,external_id,name)
-values ('30000000-0000-4000-8000-000000000001','DEMO-FSD','Full Stack Development')
+insert into public.tracks(id,external_id,name,description)
+values
+ ('30000000-0000-4000-8000-000000000001','TRK-SWE','Software Engineering','End-to-end application engineering covering transactional backends, accessible frontends, distributed resilience, and security verification.'),
+ ('30000000-0000-4000-8000-000000000002','TRK-AI','AI & Generative Intelligence','Production LLM systems, structured prompting, retrieval-augmented generation, automated evaluation guardrails, and agentic tool orchestration.'),
+ ('30000000-0000-4000-8000-000000000003','TRK-ML','Machine Learning & Data Science','Statistical rigor, feature engineering, neural architectures, temporal experimentation, and reproducible MLOps serving pipelines.'),
+ ('30000000-0000-4000-8000-000000000004','TRK-CLOUD','Cloud & Infrastructure','Linux networking, container orchestration, declarative infrastructure-as-code, observability, and resilient cloud operations.')
 on conflict (id) do nothing;
 
-insert into public.badges(id,track_id,external_id,name,level)
-values ('40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','DEMO-FSD-L1','Full Stack Foundations','Level 1')
+insert into public.badges(id,track_id,external_id,name,level,description)
+values
+ ('40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','DEMO-FSD-L1','Full Stack Foundations','Level 1','Core JavaScript and TypeScript execution semantics, relational SQL data modeling, and cleanly structured REST APIs.'),
+ ('40000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000002','BADGE-AI-L1','Prompt Engineering & Structured Outputs','Level 1','Designing deterministic prompts, JSON schema constrained outputs, and repeatable verification rubrics for production LLM workflows.')
 on conflict (id) do nothing;
 
 insert into public.skills(id,external_id,name)
 values
  ('50000000-0000-4000-8000-000000000001','DEMO-JS','JavaScript'),
- ('50000000-0000-4000-8000-000000000002','DEMO-DB','Databases')
+ ('50000000-0000-4000-8000-000000000002','DEMO-DB','Databases'),
+ ('50000000-0000-4000-8000-000000000003','SKL-PROMPT','Prompt Design & Schemas'),
+ ('50000000-0000-4000-8000-000000000004','SKL-LLM-API','LLM API Integration')
 on conflict (id) do nothing;
 
 insert into public.badge_required_skills
 values
  ('40000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',1),
- ('40000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000002',1)
+ ('40000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000002',1),
+ ('40000000-0000-4000-8000-000000000002','50000000-0000-4000-8000-000000000003',1),
+ ('40000000-0000-4000-8000-000000000002','50000000-0000-4000-8000-000000000004',1)
 on conflict (badge_id, skill_id) do nothing;
 
+-- Only fictional demo accounts receive seeded skill clearances (never real users, never fake results/awards)
 insert into public.skill_progress(student_id,skill_id,achieved_level,verified_at,source_updated_at)
 values
  ('10000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',1,now(),now()),
  ('10000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000002',1,now(),now()),
+ ('10000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000003',1,now(),now()),
+ ('10000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000004',1,now(),now()),
  ('10000000-0000-4000-8000-000000000002','50000000-0000-4000-8000-000000000001',1,now(),now())
 on conflict (student_id, skill_id) do nothing;
 

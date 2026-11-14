@@ -9,6 +9,9 @@ import {
   CheckCircle2,
   Clock,
   Globe,
+  Layers,
+  Lock,
+  MailCheck,
   RefreshCw,
   UserCheck,
 } from "lucide-react";
@@ -39,18 +42,16 @@ import {
 } from "@frontend/services/dataCache";
 import {
   bookStudentInterview,
-  fetchBadgeEligibility,
-  fetchBadgesCatalog,
   fetchBookableInterviewers,
   fetchBookableSlots,
+  fetchStudentOverview,
 } from "@frontend/services/hubApi";
 import type {
-  BadgeSummary,
   BookableInterviewerSummary,
   BookableSlot,
-  EligibilityDecision,
   InterviewRecord,
   SlotsDiscoveryResponse,
+  StudentOverviewResponse,
 } from "@frontend/types/api";
 
 const COMMON_TIMEZONES = [
@@ -89,24 +90,21 @@ export function StudentBookingView() {
 
   const initialBadgeId = searchParams.get("badgeId") ?? "";
 
-  const [badges, setBadges] = useState<BadgeSummary[]>(() =>
+  const [overview, setOverview] = useState<StudentOverviewResponse | null>(() =>
     userId
-      ? (getCachedData<BadgeSummary[]>(userId, "student:badges-catalog")?.data ??
-          [])
-      : []
+      ? (getCachedData<StudentOverviewResponse>(userId, "student:overview")
+          ?.data ?? null)
+      : null
   );
-  const [loadingBadges, setLoadingBadges] = useState<boolean>(() =>
+  const [loadingCatalog, setLoadingCatalog] = useState<boolean>(() =>
     userId
-      ? !getCachedData<BadgeSummary[]>(userId, "student:badges-catalog")
+      ? !getCachedData<StudentOverviewResponse>(userId, "student:overview")
       : true
   );
-  const [badgeId, setBadgeId] = useState(initialBadgeId);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
 
-  const [eligibility, setEligibility] = useState<EligibilityDecision | null>(
-    null
-  );
-  const [checkingEligibility, setCheckingEligibility] = useState(false);
-  const [eligibilityError, setEligibilityError] = useState<string | null>(null);
+  const [selectedTrackId, setSelectedTrackId] = useState<string>("ALL");
+  const [badgeId, setBadgeId] = useState(initialBadgeId);
 
   const [interviewers, setInterviewers] = useState<
     BookableInterviewerSummary[]
@@ -136,93 +134,159 @@ export function StudentBookingView() {
     key: string;
   }>({ signature: "", key: "" });
 
-  useEffect(() => {
-    if (!userId || !isAuthorized) return;
-    let active = true;
+  const loadCatalog = useCallback(
+    async (force = false) => {
+      if (!userId || !isAuthorized) return;
 
-    const cached = getCachedData<BadgeSummary[]>(
-      userId,
-      "student:badges-catalog"
-    );
-    if (cached) {
-      const activeList = cached.data.filter((b) => b.is_active);
-      setBadges(activeList);
-      setLoadingBadges(false);
-      if (!initialBadgeId && activeList.length > 0 && !badgeId) {
-        setBadgeId(activeList[0].id);
+      const cached = getCachedData<StudentOverviewResponse>(
+        userId,
+        "student:overview"
+      );
+      if (cached && !force) {
+        setOverview(cached.data);
+        setLoadingCatalog(false);
+        if (!cached.isStale) return;
+      } else if (!cached) {
+        setLoadingCatalog(true);
       }
-      if (!cached.isStale) return;
-    } else {
-      setLoadingBadges(true);
+
+      setCatalogError(null);
+      try {
+        const data = await fetchWithUserCache(
+          userId,
+          "student:overview",
+          fetchStudentOverview,
+          { force }
+        );
+        setOverview(data);
+      } catch (err) {
+        if (!cached) {
+          setCatalogError(formatApiErrorMessage(err));
+        }
+      } finally {
+        setLoadingCatalog(false);
+      }
+    },
+    [isAuthorized, userId]
+  );
+
+  useEffect(() => {
+    void loadCatalog(false);
+  }, [loadCatalog]);
+
+  const tracks = useMemo(() => overview?.tracks ?? [], [overview?.tracks]);
+  const badges = useMemo(
+    () => (overview?.badges ?? []).filter((b) => b.is_active),
+    [overview?.badges]
+  );
+
+  // Sync default badge and track selection once overview loads
+  useEffect(() => {
+    if (badges.length === 0) return;
+
+    if (initialBadgeId) {
+      const requested = badges.find((b) => b.id === initialBadgeId);
+      if (requested) {
+        setBadgeId((prev) => prev || requested.id);
+        setSelectedTrackId((prev) =>
+          prev === "ALL" ? requested.track_id : prev
+        );
+        return;
+      }
     }
 
-    fetchWithUserCache(userId, "student:badges-catalog", fetchBadgesCatalog)
-      .then((list) => {
-        if (!active) return;
-        const activeList = list.filter((b) => b.is_active);
-        setBadges(activeList);
-        if (!initialBadgeId && activeList.length > 0) {
-          setBadgeId((prev) => prev || activeList[0].id);
-        }
-      })
-      .catch(() => {
-        // Fallback handled if empty
-      })
-      .finally(() => {
-        if (active) setLoadingBadges(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [badgeId, initialBadgeId, isAuthorized, userId]);
+    if (!badgeId) {
+      const firstEligible = badges.find(
+        (b) => overview?.eligibilities[b.id]?.eligible
+      );
+      const chosen = firstEligible ?? badges[0];
+      setBadgeId(chosen.id);
+    }
+  }, [badgeId, badges, initialBadgeId, overview?.eligibilities]);
 
-  const loadEligibilityAndDirectory = useCallback(
+  const visibleBadges = useMemo(() => {
+    if (selectedTrackId === "ALL") return badges;
+    return badges.filter((b) => b.track_id === selectedTrackId);
+  }, [badges, selectedTrackId]);
+
+  const selectedTrack = useMemo(
+    () => tracks.find((t) => t.id === selectedTrackId) ?? null,
+    [selectedTrackId, tracks]
+  );
+
+  const selectedBadge = useMemo(
+    () => badges.find((b) => b.id === badgeId) ?? null,
+    [badgeId, badges]
+  );
+
+  const selectedBadgeTrack = useMemo(
+    () =>
+      selectedBadge
+        ? (tracks.find((t) => t.id === selectedBadge.track_id) ?? null)
+        : null,
+    [selectedBadge, tracks]
+  );
+
+  const eligibility = useMemo(
+    () => (badgeId && overview ? (overview.eligibilities[badgeId] ?? null) : null),
+    [badgeId, overview]
+  );
+
+  const skillRequirementRows = useMemo(() => {
+    if (!overview || !badgeId) return [];
+    const skillMap = new Map(overview.skills.map((s) => [s.id, s]));
+    const progressMap = new Map(
+      overview.skillProgress.map((p) => [p.skill_id, p])
+    );
+    const now = new Date();
+    return overview.requiredSkills
+      .filter((r) => r.badge_id === badgeId)
+      .map((req) => {
+        const skill = skillMap.get(req.skill_id);
+        const progress = progressMap.get(req.skill_id);
+        const verified =
+          Boolean(progress?.verified_at) &&
+          new Date(progress!.verified_at!) <= now &&
+          progress!.achieved_level >= req.required_level;
+        return {
+          skillId: req.skill_id,
+          skillName: skill?.name ?? req.skill_id,
+          requiredLevel: req.required_level,
+          achievedLevel: progress?.achieved_level ?? 0,
+          verified,
+        };
+      });
+  }, [badgeId, overview]);
+
+  const loadDirectory = useCallback(
     async (targetBadgeId: string) => {
       if (!userId || !isAuthorized || !isValidUuid(targetBadgeId)) {
-        setEligibility(null);
         setInterviewers([]);
         return;
       }
 
-      const cachedElig = getCachedData<EligibilityDecision>(
-        userId,
-        `student:elig:${targetBadgeId}`
-      );
       const cachedDir = getCachedData<BookableInterviewerSummary[]>(
         userId,
         `student:dir:${targetBadgeId}`
       );
-
-      if (cachedElig && cachedDir) {
-        setEligibility(cachedElig.data);
+      if (cachedDir) {
         setInterviewers(cachedDir.data);
-        setCheckingEligibility(false);
         setLoadingInterviewers(false);
-        if (!cachedElig.isStale && !cachedDir.isStale) return;
+        if (!cachedDir.isStale) return;
       } else {
-        setCheckingEligibility(true);
         setLoadingInterviewers(true);
       }
 
-      setEligibilityError(null);
       try {
-        const [elig, dir] = await Promise.all([
-          fetchWithUserCache(userId, `student:elig:${targetBadgeId}`, () =>
-            fetchBadgeEligibility(targetBadgeId)
-          ),
-          fetchWithUserCache(userId, `student:dir:${targetBadgeId}`, () =>
-            fetchBookableInterviewers(targetBadgeId)
-          ),
-        ]);
-        setEligibility(elig);
+        const dir = await fetchWithUserCache(
+          userId,
+          `student:dir:${targetBadgeId}`,
+          () => fetchBookableInterviewers(targetBadgeId)
+        );
         setInterviewers(dir);
-      } catch (err) {
-        if (!cachedElig) {
-          setEligibility(null);
-          setEligibilityError(formatApiErrorMessage(err));
-        }
+      } catch {
+        if (!cachedDir) setInterviewers([]);
       } finally {
-        setCheckingEligibility(false);
         setLoadingInterviewers(false);
       }
     },
@@ -232,8 +296,8 @@ export function StudentBookingView() {
   useEffect(() => {
     setSelectedInterviewerId("ALL");
     setSelectedSlot(null);
-    void loadEligibilityAndDirectory(badgeId);
-  }, [badgeId, loadEligibilityAndDirectory]);
+    void loadDirectory(badgeId);
+  }, [badgeId, loadDirectory]);
 
   const loadSlots = useCallback(async () => {
     if (!isAuthorized || !isValidUuid(badgeId)) {
@@ -279,8 +343,6 @@ export function StudentBookingView() {
     () => groupBookableSlotsByDate(slotsResponse?.slots ?? [], timezone),
     [slotsResponse?.slots, timezone]
   );
-
-  const selectedBadge = badges.find((b) => b.id === badgeId) ?? null;
 
   const getIdempotencyKeyForPayload = (signature: string): string => {
     if (idempotencyState.signature === signature && idempotencyState.key) {
@@ -352,7 +414,7 @@ export function StudentBookingView() {
           { label: "Book Interview" },
         ]}
         title="Book Badge Interview"
-        description="Verify your badge eligibility, choose an approved assessor, and select an open slot."
+        description="Browse certification tracks, inspect required skill eligibility, choose an approved assessor, and select an open slot."
       />
 
       {bookedInterview ? (
@@ -367,7 +429,7 @@ export function StudentBookingView() {
             />
             <div className="min-w-0 flex-1">
               <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-                Your interview is confirmed
+                Your GRIT interview is confirmed
               </h2>
               <p className="mt-1 text-sm text-[var(--text-secondary)]">
                 Booking Reference:{" "}
@@ -415,6 +477,13 @@ export function StudentBookingView() {
                   <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </Link>
                 <Link
+                  href="/student/messages"
+                  className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]"
+                >
+                  <MailCheck className="h-4 w-4" aria-hidden="true" />
+                  <span>View Confirmation Message</span>
+                </Link>
+                <Link
                   href="/student/interviews"
                   className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
                 >
@@ -432,20 +501,35 @@ export function StudentBookingView() {
               <ErrorBanner title="Booking rejected" message={submitError} />
             ) : null}
 
-            {/* Step 1: Badge Selection */}
+            {/* Step 1: Track & Badge Selection */}
             <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
-              <div className="flex items-center gap-2.5">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] font-mono text-[11px] font-semibold text-[var(--accent-text)]">
-                  01
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] font-mono text-[11px] font-semibold text-[var(--accent-text)]">
+                    01
+                  </span>
+                  <h2 className="text-base font-semibold text-[var(--text-primary)]">
+                    Select Track &amp; Target Badge
+                  </h2>
+                </div>
+                <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-[var(--text-muted)]">
+                  <Layers className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>
+                    {tracks.length} tracks · {badges.length} badges
+                  </span>
                 </span>
-                <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                  Select Target Badge
-                </h2>
               </div>
 
-              {loadingBadges ? (
+              {loadingCatalog ? (
                 <div className="mt-4">
-                  <SectionSkeleton rows={2} />
+                  <SectionSkeleton rows={3} />
+                </div>
+              ) : catalogError ? (
+                <div className="mt-4">
+                  <ErrorBanner
+                    message={catalogError}
+                    onRetry={() => void loadCatalog(true)}
+                  />
                 </div>
               ) : badges.length === 0 ? (
                 <div className="mt-4">
@@ -455,29 +539,115 @@ export function StudentBookingView() {
                   />
                 </div>
               ) : (
-                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {badges.map((b) => {
-                    const active = b.id === badgeId;
-                    return (
-                      <button
-                        key={b.id}
-                        type="button"
-                        onClick={() => setBadgeId(b.id)}
-                        className={`rounded-md border p-4 text-left transition-colors ${
-                          active
-                            ? "border-[var(--accent-primary)] bg-[var(--accent-soft)]"
-                            : "border-[var(--border-hairline)] bg-[var(--bg-canvas)]/40 hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]"
-                        }`}
+                <div className="mt-4 space-y-4">
+                  {/* Track Filter Tabs */}
+                  {tracks.length > 0 ? (
+                    <div>
+                      <div
+                        role="tablist"
+                        aria-label="Filter badges by certification track"
+                        className="flex flex-wrap gap-1.5"
                       >
-                        <p className="text-sm font-semibold text-[var(--text-primary)]">
-                          {b.name}
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={selectedTrackId === "ALL"}
+                          onClick={() => setSelectedTrackId("ALL")}
+                          className={`min-h-8 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                            selectedTrackId === "ALL"
+                              ? "bg-[var(--accent-primary)] text-white"
+                              : "border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
+                          }`}
+                        >
+                          All Tracks ({badges.length})
+                        </button>
+                        {tracks.map((track) => {
+                          const count = badges.filter(
+                            (b) => b.track_id === track.id
+                          ).length;
+                          const active = selectedTrackId === track.id;
+                          return (
+                            <button
+                              key={track.id}
+                              type="button"
+                              role="tab"
+                              aria-selected={active}
+                              onClick={() => {
+                                setSelectedTrackId(track.id);
+                                const firstInTrack = badges.find(
+                                  (b) => b.track_id === track.id
+                                );
+                                if (
+                                  firstInTrack &&
+                                  selectedBadge?.track_id !== track.id
+                                ) {
+                                  setBadgeId(firstInTrack.id);
+                                }
+                              }}
+                              className={`min-h-8 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                                active
+                                  ? "bg-[var(--accent-primary)] text-white"
+                                  : "border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
+                              }`}
+                            >
+                              {track.name} ({count})
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {selectedTrack?.description ? (
+                        <p className="mt-2.5 text-xs leading-relaxed text-[var(--text-secondary)]">
+                          {selectedTrack.description}
                         </p>
-                        <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
-                          {b.level} {b.external_id ? `· ${b.external_id}` : ""}
-                        </p>
-                      </button>
-                    );
-                  })}
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {/* Badges Grid */}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {visibleBadges.map((b) => {
+                      const active = b.id === badgeId;
+                      const badgeElig = overview?.eligibilities[b.id];
+                      const badgeTrack = tracks.find(
+                        (t) => t.id === b.track_id
+                      );
+                      return (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => setBadgeId(b.id)}
+                          className={`flex flex-col justify-between rounded-md border p-4 text-left transition-colors ${
+                            active
+                              ? "border-[var(--accent-primary)] bg-[var(--accent-soft)]"
+                              : "border-[var(--border-hairline)] bg-[var(--bg-canvas)]/40 hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]"
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-sm font-semibold text-[var(--text-primary)]">
+                                {b.name}
+                              </p>
+                              {badgeElig?.eligible ? (
+                                <StatusText label="Eligible" tone="success" />
+                              ) : (
+                                <StatusText label="Locked" tone="neutral" />
+                              )}
+                            </div>
+                            <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+                              {b.level}
+                              {badgeTrack ? ` · ${badgeTrack.name}` : ""}
+                            </p>
+                            {b.description ? (
+                              <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--text-muted)]">
+                                {b.description}
+                              </p>
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </section>
@@ -508,6 +678,20 @@ export function StudentBookingView() {
                   Any Available Interviewer
                 </button>
               </div>
+
+              {eligibility && !eligibility.eligible ? (
+                <div className="mt-4 flex items-start gap-2.5 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-3.5 text-xs text-[var(--text-secondary)]">
+                  <Lock
+                    className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)]"
+                    aria-hidden="true"
+                  />
+                  <span>
+                    Booking for <strong>{selectedBadge?.name}</strong> is locked
+                    until required skill clearances are verified. You can preview
+                    assessors below or switch to an eligible badge above.
+                  </span>
+                </div>
+              ) : null}
 
               {loadingInterviewers ? (
                 <div className="mt-4">
@@ -646,12 +830,16 @@ export function StudentBookingView() {
 
                   <button
                     type="button"
+                    disabled={loadingSlots}
                     onClick={() => void loadSlots()}
                     aria-label="Refresh available slots"
-                    className="inline-flex min-h-9 items-center gap-1 whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                    className="inline-flex min-h-9 items-center gap-1 whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] disabled:opacity-60"
                   >
-                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>Refresh</span>
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${loadingSlots ? "animate-spin" : ""}`}
+                      aria-hidden="true"
+                    />
+                    <span>{loadingSlots ? "Refreshing..." : "Refresh"}</span>
                   </button>
                 </div>
               </div>
@@ -761,16 +949,12 @@ export function StudentBookingView() {
                 Eligibility Verification
               </h2>
               <div className="mt-3">
-                {checkingEligibility ? (
+                {loadingCatalog ? (
                   <p className="text-xs text-[var(--text-secondary)]">
                     Checking required skill clearances...
                   </p>
-                ) : eligibilityError ? (
-                  <p className="text-xs text-[var(--status-error)]">
-                    {eligibilityError}
-                  </p>
                 ) : eligibility ? (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <StatusText
                       label={
                         eligibility.eligible
@@ -782,10 +966,32 @@ export function StudentBookingView() {
                     <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
                       {eligibility.reason}
                     </p>
-                    {eligibility.unmetSkillIds.length > 0 ? (
-                      <p className="font-mono text-xs text-[var(--text-muted)]">
-                        Unmet skills: {eligibility.unmetSkillIds.join(", ")}
-                      </p>
+
+                    {skillRequirementRows.length > 0 ? (
+                      <div className="space-y-1.5 border-t border-[var(--border-hairline)] pt-3">
+                        <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+                          Required Skill Clearances
+                        </p>
+                        {skillRequirementRows.map((row) => (
+                          <div
+                            key={row.skillId}
+                            className="flex items-center justify-between gap-2 rounded border border-[var(--border-hairline)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-xs"
+                          >
+                            <span className="truncate font-medium text-[var(--text-primary)]">
+                              {row.skillName}
+                            </span>
+                            <span
+                              className={`shrink-0 font-mono text-[11px] tabular-nums ${
+                                row.verified
+                                  ? "text-[var(--status-success)]"
+                                  : "text-[var(--text-muted)]"
+                              }`}
+                            >
+                              L{row.achievedLevel}/L{row.requiredLevel}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     ) : null}
                   </div>
                 ) : (
@@ -801,6 +1007,12 @@ export function StudentBookingView() {
                 Booking Summary
               </h2>
               <dl className="mt-3 space-y-3 text-xs">
+                <div>
+                  <dt className="text-[var(--text-secondary)]">Track</dt>
+                  <dd className="mt-0.5 font-medium text-[var(--text-primary)]">
+                    {selectedBadgeTrack?.name ?? "Select a badge"}
+                  </dd>
+                </div>
                 <div>
                   <dt className="text-[var(--text-secondary)]">Badge</dt>
                   <dd className="mt-0.5 font-medium text-[var(--text-primary)]">
@@ -846,7 +1058,9 @@ export function StudentBookingView() {
                   onClick={() => setConfirmOpen(true)}
                   className="inline-flex min-h-10 w-full items-center justify-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Review &amp; Confirm Booking
+                  {eligibility && !eligibility.eligible
+                    ? "Complete Required Skills to Book"
+                    : "Review & Confirm Booking"}
                 </button>
               </div>
             </div>

@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { AppError, errorResponse } from "@backend/lib/errors";
 import { enforceRateLimit, getClientIp } from "@backend/lib/rateLimit";
 import { createSupabaseAdminClient } from "@backend/lib/supabase/admin";
-import { verifyInvitationToken } from "@backend/modules/invitations/service";
+import { createSupabaseServerClient } from "@backend/lib/supabase/server";
+import { verifyInvitationForSession } from "@backend/modules/invitations/service";
 
 export const runtime = "nodejs";
 
@@ -16,13 +17,18 @@ export async function GET(request: Request) {
     });
 
     const url = new URL(request.url);
-    const token = url.searchParams.get("token")?.trim() ?? "";
-    if (!token) {
-      throw new AppError("VALIDATION_ERROR", 422, "Invitation token query parameter is required");
+    const invitationId = url.searchParams.get("invitationId")?.trim() ?? "";
+    if (!invitationId) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        422,
+        "invitationId query parameter is required"
+      );
     }
 
+    const userDb = await createSupabaseServerClient();
     const adminDb = createSupabaseAdminClient();
-    const data = await verifyInvitationToken(adminDb, token);
+    const data = await verifyInvitationForSession(userDb, adminDb, invitationId);
     return NextResponse.json({ data });
   } catch (error) {
     return errorResponse(error);

@@ -14,6 +14,7 @@ import {
   groupBookableSlotsByDate,
   isValidUuid,
   parseAuthCallbackParams,
+  resolveActiveNavHref,
   resolveDefaultPortalPath,
   resolvePortalRedirect,
   sanitizeNextPath,
@@ -410,4 +411,44 @@ test("parseAuthCallbackParams extracts PKCE code, token_hash, implicit session t
     nextPath: null,
   });
 });
+
+test("resolveActiveNavHref highlights at most one student navigation item and distinguishes Book Interview from My Interviews", () => {
+  const studentNav = [
+    { href: "/student" },
+    { href: "/student/badges" },
+    { href: "/student/interviews/book" },
+    { href: "/student/interviews" },
+    { href: "/student/messages" },
+    { href: "/student/malpractice" },
+  ];
+
+  assert.equal(resolveActiveNavHref("/student", studentNav), "/student");
+  assert.equal(resolveActiveNavHref("/student/", studentNav), "/student");
+  assert.equal(
+    resolveActiveNavHref("/student/interviews/book", studentNav),
+    "/student/interviews/book"
+  );
+  assert.equal(
+    resolveActiveNavHref("/student/interviews", studentNav),
+    "/student/interviews"
+  );
+  assert.equal(
+    resolveActiveNavHref("/student/interviews/abc-123", studentNav),
+    "/student/interviews"
+  );
+  assert.equal(
+    resolveActiveNavHref("/student/badges", studentNav),
+    "/student/badges"
+  );
+  assert.equal(
+    resolveActiveNavHref("/student/messages", studentNav),
+    "/student/messages"
+  );
+  assert.equal(
+    resolveActiveNavHref("/student/malpractice", studentNav),
+    "/student/malpractice"
+  );
+  assert.equal(resolveActiveNavHref("/student/journey-preview", studentNav), null);
+});
+
 

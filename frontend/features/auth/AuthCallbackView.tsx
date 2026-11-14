@@ -172,14 +172,19 @@ export function AuthCallbackView() {
         const loaded = await refreshProfile({ silent: true, force: true });
         if (loaded) {
           const target = resolveSafeDestination(loaded.roles, parsed.nextPath);
+          const isInvitation = target.startsWith("/invitations/accept");
           setDestination(target);
           setPhase("verified");
           setMessage(
-            "Email verified and session activated. Taking you to your portal now."
+            isInvitation
+              ? "Invitation verified. Taking you to complete interviewer onboarding."
+              : "Email verified and session activated. Taking you to your portal now."
           );
           pushToast({
-            title: "Email verified",
-            description: `Welcome to GRIT Interview Hub, ${loaded.full_name}.`,
+            title: isInvitation ? "Invitation verified" : "Email verified",
+            description: isInvitation
+              ? "Review your assessor details and accept your interviewer role."
+              : `Welcome to GRIT Interview Hub, ${loaded.full_name}.`,
             tone: "success",
           });
           window.setTimeout(() => {
