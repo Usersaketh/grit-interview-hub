@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  Loader2,
   RefreshCw,
   Terminal,
   UserPlus,
@@ -134,13 +135,8 @@ export function SignupView() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)]">
-      <div
-        aria-hidden="true"
-        className="grit-grid-bg pointer-events-none absolute inset-x-0 top-0 h-[420px] opacity-30 [mask-image:linear-gradient(to_bottom,black,transparent)]"
-      />
-
-      <header className="relative z-10 flex h-14 items-center justify-between gap-2 border-b border-[var(--border-hairline)] bg-[var(--bg-glass)] px-4 backdrop-blur-md sm:gap-4 sm:px-8">
+    <div className="flex min-h-screen flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)]">
+      <header className="flex h-14 items-center justify-between gap-2 border-b border-[var(--border-hairline)] bg-[var(--bg-glass)] px-4 backdrop-blur-md sm:gap-4 sm:px-8">
         <Link
           href="/"
           className="flex min-w-0 items-center gap-2 whitespace-nowrap text-sm font-semibold tracking-tight text-[var(--text-primary)]"
@@ -235,7 +231,11 @@ export function SignupView() {
                   disabled={resending}
                   className="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] disabled:opacity-50"
                 >
-                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                  {resending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
                   <span>{resending ? "Sending..." : "Resend Email"}</span>
                 </button>
                 <Link
@@ -414,7 +414,11 @@ export function SignupView() {
                 disabled={submitting || !supabaseConfigured}
                 className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] disabled:opacity-55 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
               >
-                <UserPlus className="h-4 w-4 shrink-0" aria-hidden="true" />
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+                ) : (
+                  <UserPlus className="h-4 w-4 shrink-0" aria-hidden="true" />
+                )}
                 <span>
                   {submitting
                     ? "Creating student account..."

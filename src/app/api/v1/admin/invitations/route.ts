@@ -22,10 +22,18 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { db } = await requireRole("OPERATIONS", "ADMIN");
+    const { db, user } = await requireRole("OPERATIONS", "ADMIN");
     const input = createInvitationSchema.parse(await request.json());
     const origin = resolveRequestOrigin(request);
-    const data = await createInterviewerInvitation(db, input, origin);
+    const { data: inviterProfile } = await db
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const data = await createInterviewerInvitation(db, input, origin, {
+      inviterName: inviterProfile?.full_name ?? user.email ?? null,
+    });
     return NextResponse.json({ data }, { status: 201 });
   } catch (error) {
     return errorResponse(error);

@@ -271,10 +271,11 @@ test("getRequiredRolesForPath, getPortalDisplayName, and sanitizeNextPath enforc
   assert.equal(sanitizeNextPath("/login"), null);
   assert.equal(sanitizeNextPath("/signup?ref=1"), null);
   assert.equal(sanitizeNextPath("/auth/callback?code=123"), null);
+  assert.equal(sanitizeNextPath("/staff-access"), null);
   assert.equal(sanitizeNextPath("  /student/badges?tab=1  "), "/student/badges?tab=1");
 });
 
-test("resolvePortalRedirect handles loading, unauthenticated access, wrong-role redirects, and auth pages", () => {
+test("resolvePortalRedirect handles loading, unauthenticated access, wrong-role redirects, auth pages, and /staff-access", () => {
   assert.equal(
     resolvePortalRedirect({
       pathname: "/student",
@@ -344,6 +345,27 @@ test("resolvePortalRedirect handles loading, unauthenticated access, wrong-role 
   });
   assert.equal(loginForbiddenNext?.target, "/student");
   assert.equal(loginForbiddenNext?.reason, "unauthorized_role");
+
+  assert.deepEqual(
+    resolvePortalRedirect({
+      pathname: "/staff-access",
+      profile: { roles: ["OPERATIONS"] },
+      loading: false,
+    }),
+    {
+      target: "/operations",
+      reason: "authenticated_auth_page",
+    }
+  );
+
+  const studentOnStaffAccess = resolvePortalRedirect({
+    pathname: "/staff-access",
+    profile: { roles: ["STUDENT"] },
+    loading: false,
+  });
+  assert.equal(studentOnStaffAccess?.target, "/student");
+  assert.equal(studentOnStaffAccess?.reason, "unauthorized_role");
+  assert.equal(Boolean(studentOnStaffAccess?.toastTitle), true);
 });
 
 test("parseAuthCallbackParams extracts PKCE code, token_hash, implicit session tokens, errors, and empty states", () => {

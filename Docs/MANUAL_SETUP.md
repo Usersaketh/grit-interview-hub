@@ -13,11 +13,17 @@
      - `http://localhost:3000/auth/callback`
      - `http://localhost:3000/**`
    - Never keep `http://localhost:3000` as the production **Site URL** or leave production redirect URLs missing from the allow-list, as Supabase falls back to **Site URL** whenever `emailRedirectTo` is not allow-listed.
-5. In Database → Replication, enable the documented tables if realtime is required; configure Realtime Authorization before exposing channels.
-6. Create a GitHub repository, commit this code, then import it into Vercel. Configure the exact same environment variables in Vercel (set `NEXT_PUBLIC_APP_URL=https://gritinterviewhub.vercel.app` and mark `SUPABASE_SERVICE_ROLE_KEY` as sensitive) and deploy.
+5. **Configure the Supabase Signup Email Template** in Supabase Dashboard → Authentication → Emails → Templates → **Confirm signup**:
+   - Copy the HTML from `Docs/email-templates/supabase-confirm-signup.html` and paste it into the template body (uses `{{ .ConfirmationURL }}`).
+   - Set the subject to `Confirm your GRIT Interview Hub account`.
+6. **Configure Transactional Email for Interviewer Invitations** (recommended for production onboarding):
+   - Set `EMAIL_PROVIDER_API_KEY` (Resend API key) and `EMAIL_FROM` (verified sender such as `GRIT Interview Hub <noreply@yourdomain.com>`) in `.env.local` and Vercel environment variables.
+   - When configured, creating an interviewer invitation automatically emails the single-use `/invitations/accept?token=...` onboarding link. If unset, the Operations portal reports `not_configured` and provides the generated link for manual delivery without claiming an email was sent.
+7. In Database → Replication, enable the documented tables if realtime is required; configure Realtime Authorization before exposing channels.
+8. Create a GitHub repository, commit this code, then import it into Vercel. Configure the exact same environment variables in Vercel (set `NEXT_PUBLIC_APP_URL=https://gritinterviewhub.vercel.app` and mark `SUPABASE_SERVICE_ROLE_KEY` and `EMAIL_PROVIDER_API_KEY` as sensitive) and deploy.
 
 Run locally: `npm install`, `npm run dev`. Verify: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
 
 ## Optional
 
-Configure an email provider and set `EMAIL_PROVIDER_API_KEY` and `EMAIL_FROM`, then implement/deploy a worker for the outbox. Obtain GRIT's approved identity, skills, certification and nullification API contracts before replacing the read model/integration adapter.
+Obtain GRIT's approved identity, skills, certification and nullification API contracts before replacing the read model/integration adapter.

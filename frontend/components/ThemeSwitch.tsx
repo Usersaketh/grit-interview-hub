@@ -1,44 +1,21 @@
 "use client";
 
-import { Monitor, Moon, Sun } from "lucide-react";
-import { useTheme, type ThemeMode } from "@frontend/hooks/useTheme";
-
-const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
-  { value: "light", label: "Light", icon: Sun },
-  { value: "dark", label: "Dark", icon: Moon },
-  { value: "system", label: "System", icon: Monitor },
-];
+import { Moon, Sun } from "lucide-react";
+import { useTheme } from "@frontend/hooks/useTheme";
 
 export function ThemeSwitch() {
-  const { mode, setMode } = useTheme();
+  const { toggleTheme } = useTheme();
 
   return (
-    <div
-      role="group"
-      aria-label="Color theme"
-      className="inline-flex items-center rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-0.5"
+    <button
+      type="button"
+      onClick={toggleTheme}
+      aria-label="Toggle color theme"
+      title="Toggle Light / Dark theme"
+      className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
     >
-      {THEME_OPTIONS.map((opt) => {
-        const Icon = opt.icon;
-        const active = mode === opt.value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => setMode(opt.value)}
-            aria-pressed={active}
-            aria-label={`${opt.label} theme`}
-            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] ${
-              active
-                ? "bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-xs"
-                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span className="hidden sm:inline">{opt.label}</span>
-          </button>
-        );
-      })}
-    </div>
+      <Sun className="hidden h-4 w-4 dark:block" aria-hidden="true" />
+      <Moon className="block h-4 w-4 dark:hidden" aria-hidden="true" />
+    </button>
   );
 }

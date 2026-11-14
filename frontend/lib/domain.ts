@@ -377,7 +377,8 @@ export function sanitizeNextPath(
   if (
     pathname === "/login" ||
     pathname === "/signup" ||
-    pathname === "/auth/callback"
+    pathname === "/auth/callback" ||
+    pathname === "/staff-access"
   ) {
     return null;
   }
@@ -426,6 +427,22 @@ export function resolvePortalRedirect(params: {
     }
 
     return null;
+  }
+
+  if (pathname === "/staff-access" && profile) {
+    if (hasAllowedRole(profile.roles, ["OPERATIONS", "ADMIN"])) {
+      return {
+        target: "/operations",
+        reason: "authenticated_auth_page",
+      };
+    }
+    const fallback = resolveDefaultPortalPath(profile.roles);
+    return {
+      target: fallback,
+      reason: "unauthorized_role",
+      toastTitle: "Staff access restricted",
+      toastDescription: `Signed-in account does not hold Operations permissions. Opened ${getPortalDisplayName(fallback)}.`,
+    };
   }
 
   if ((pathname === "/login" || pathname === "/signup") && profile) {

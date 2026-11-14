@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Check, Copy, MailPlus, RefreshCw, ShieldX } from "lucide-react";
+import { Check, Copy, Loader2, MailCheck, MailPlus, RefreshCw, ShieldX } from "lucide-react";
 import { AppShell } from "@frontend/components/AppShell";
 import { ConfirmDialog } from "@frontend/components/ConfirmDialog";
 import { PageHeader } from "@frontend/components/PageHeader";
@@ -82,6 +82,11 @@ export function OperationsInvitationsView() {
   const [creating, setCreating] = useState(false);
   const [createIdemKey, setCreateIdemKey] = useState(() => generateUuid());
   const [issuedInviteUrl, setIssuedInviteUrl] = useState<string | null>(null);
+  const [emailDelivery, setEmailDelivery] = useState<{
+    status: "sent" | "not_configured" | "failed";
+    recipient: string;
+    error?: string;
+  } | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
   // Revoke state
@@ -157,17 +162,40 @@ export function OperationsInvitationsView() {
       });
 
       setIssuedInviteUrl(res.inviteUrl);
+      setEmailDelivery(
+        res.emailDelivery
+          ? {
+              status: res.emailDelivery.status,
+              recipient: res.emailDelivery.recipient,
+              error: res.emailDelivery.error,
+            }
+          : null
+      );
       setCopiedUrl(false);
       setEmail("");
       setFullName("");
       setTitle("");
       setExpertiseInput("");
       setCreateIdemKey(generateUuid());
-      pushToast({
-        tone: "success",
-        title: "Invitation created",
-        description: `Issued single-use INTERVIEWER invitation for ${res.invitation.email}.`,
-      });
+      if (res.emailDelivery?.status === "sent") {
+        pushToast({
+          tone: "success",
+          title: "Invitation created and emailed",
+          description: `Sent onboarding link to ${res.invitation.email}.`,
+        });
+      } else if (res.emailDelivery?.status === "failed") {
+        pushToast({
+          tone: "warning",
+          title: "Invitation created (email failed)",
+          description: `Could not email ${res.invitation.email}. Copy and share the one-time link manually.`,
+        });
+      } else {
+        pushToast({
+          tone: "info",
+          title: "Invitation created",
+          description: `Share the single-use onboarding link with ${res.invitation.email} (automated email not configured).`,
+        });
+      }
       if (userId) invalidateUserCache(userId, "ops:");
       await loadInvitations(true);
     } catch (err) {
@@ -375,24 +403,65 @@ export function OperationsInvitationsView() {
             <button
               type="submit"
               disabled={creating}
-              className="inline-flex min-h-10 w-full items-center justify-center whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] disabled:opacity-55"
+              className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-primary-hover)] disabled:opacity-55"
             >
-              {creating
-                ? "Generating Secure Link..."
-                : "Create Interviewer Invitation"}
+              {creating ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <MailPlus className="h-4 w-4" aria-hidden="true" />
+              )}
+              <span>
+                {creating
+                  ? "Creating invitation..."
+                  : "Create Interviewer Invitation"}
+              </span>
             </button>
           </form>
 
           {issuedInviteUrl ? (
-            <div className="mt-5 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-4">
-              <p className="text-xs font-semibold text-[var(--text-primary)]">
-                Single-Use Invitation Link Ready
+            <div className="mt-5 space-y-3 rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-4">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-semibold text-[var(--text-primary)]">
+                  Single-Use Invitation Link Ready
+                </p>
+                {emailDelivery ? (
+                  <StatusText
+                    label={
+                      emailDelivery.status === "sent"
+                        ? "Email sent"
+                        : emailDelivery.status === "failed"
+                          ? "Email failed"
+                          : "Email unconfigured"
+                    }
+                    tone={
+                      emailDelivery.status === "sent"
+                        ? "success"
+                        : emailDelivery.status === "failed"
+                          ? "error"
+                          : "warning"
+                    }
+                  />
+                ) : null}
+              </div>
+
+              <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+                {emailDelivery?.status === "sent" ? (
+                  <span className="inline-flex items-center gap-1.5 text-[var(--status-success)]">
+                    <MailCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    Invitation email delivered to {emailDelivery.recipient}. You can also copy the backup link below.
+                  </span>
+                ) : emailDelivery?.status === "failed" ? (
+                  <span className="text-[var(--status-error)]">
+                    Automated email delivery failed ({emailDelivery.error || "provider error"}). Copy and share this single-use link directly with {emailDelivery.recipient}.
+                  </span>
+                ) : (
+                  <span>
+                    Automated email delivery is not configured in this environment. Copy and share this single-use link directly with the invited interviewer.
+                  </span>
+                )}
               </p>
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                Share this link securely with the invited interviewer. Only a
-                SHA-256 hash is stored on the server.
-              </p>
-              <div className="mt-2.5 flex items-center gap-2">
+
+              <div className="flex items-center gap-2">
                 <input
                   type="text"
                   readOnly

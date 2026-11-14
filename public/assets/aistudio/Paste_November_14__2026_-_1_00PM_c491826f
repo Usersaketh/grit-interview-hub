@@ -1,0 +1,1024 @@
+# GRIT Interview Hub — Complete Product, UX, Authentication & Performance Improvement Brief
+
+You are acting as a senior full-stack product engineer, UX architect, and design systems engineer.
+
+Your task is to significantly improve the existing GRIT Interview Hub application, including its visual identity, user experience, authentication flows, email workflows, navigation, loading behavior, and operational access.
+
+**This is an existing, functioning application. You are NOT building a new application from scratch.**
+
+Your responsibility is to understand the current codebase, preserve its existing functionality, identify the root causes of the reported problems, and implement the improvements in a structured, production-conscious manner.
+
+Do not blindly replace existing components, architecture, APIs, database logic, or authentication mechanisms.
+
+---
+
+# 1. EXISTING PROJECT CONTEXT
+
+GRIT Interview Hub is an assessment and certification platform that manages the complete interview lifecycle.
+
+The application supports three roles:
+
+1. STUDENT
+2. INTERVIEWER
+3. OPERATIONS
+
+The platform includes:
+
+- Student authentication and registration.
+- Student eligibility and badge progression.
+- Interviewer invitations and onboarding.
+- Interviewer discovery.
+- Interviewer availability and interview slot discovery.
+- Conflict-free interview booking.
+- Interview cancellation and rescheduling.
+- Interview lifecycle management.
+- Interviewer evaluation and feedback.
+- Retake eligibility and cooldown enforcement.
+- Certification approval.
+- Badge award management.
+- Malpractice reporting and review.
+- Audit logging and administrative governance.
+
+### Existing technical architecture
+
+- Next.js 15 App Router.
+- TypeScript with strict typing.
+- Supabase Authentication.
+- PostgreSQL and Supabase RLS.
+- SECURITY DEFINER database functions.
+- Backend and frontend separation.
+- Vercel deployment.
+- Existing API routes and validation layers.
+- Existing role-based access control.
+- Existing migration history and production database.
+
+The repository has already undergone architectural restructuring.
+
+Before making changes, inspect:
+
+- `Docs/ARCHITECTURE.md`
+- `Docs/DATABASE.md`
+- `Docs/IMPLEMENTATION_STATUS.md`
+- `Docs/PROJECT_STRUCTURE.md`
+- `Docs/KILO_HANDOFF.md`
+- Existing authentication and authorization implementation.
+- Existing API routes.
+- Existing Supabase migrations.
+- Existing frontend layouts, components, and design tokens.
+
+Use the actual repository structure as the source of truth.
+
+Do not assume that a file exists just because it is mentioned in this brief.
+
+---
+
+# 2. NON-NEGOTIABLE IMPLEMENTATION PRINCIPLES
+
+1. Preserve all existing working business workflows.
+2. Reuse existing authentication and RBAC infrastructure.
+3. Do not create duplicate authentication systems.
+4. Do not introduce unnecessary backend abstractions.
+5. Do not weaken RLS or server-side authorization.
+6. Do not expose privileged roles through public registration.
+7. Do not introduce fake data, fake charts, fake metrics, or decorative functionality.
+8. Do not create new database migrations unless genuinely required.
+9. Never edit an already-applied production migration. Create a new forward-only migration if a schema change is necessary.
+10. Do not execute destructive database operations or modify production data without explicit authorization.
+11. Maintain existing API contracts unless a change is demonstrably necessary.
+12. Maintain strict TypeScript correctness.
+13. Maintain accessibility and responsive behavior.
+14. Every visible interactive control must actually work.
+15. Do not declare a feature complete merely because its UI has been implemented.
+
+The application must remain functional throughout the redesign.
+
+---
+
+# 3. COMPLETE UI/UX REDESIGN
+
+## Design direction: Vercel precision with a distinctive GRIT identity
+
+I want a sophisticated, premium, modern interface.
+
+Use Vercel's design precision, typography, spacing, restraint, and interaction quality as inspiration.
+
+However, do not copy Vercel or create a generic developer dashboard.
+
+The design must establish its own identity for GRIT Interview Hub.
+
+### Absolutely avoid
+
+- Generic AI-generated SaaS templates.
+- Purple-blue gradient backgrounds.
+- Large gradient blobs.
+- Grid, dot, graph-paper, or repeating-line backgrounds.
+- Glassmorphism everywhere.
+- Excessive rounded cards.
+- Card inside card inside card layouts.
+- Neon accents and unnecessary glow effects.
+- Emoji-based navigation.
+- Generic three-column dashboard layouts everywhere.
+- Fake charts and meaningless metrics.
+- Decorative badges without meaning.
+- Oversized marketing headings with no visual hierarchy.
+- Generic AI marketing copy.
+
+Do not replace the existing grid background with another decorative gimmick.
+
+The visual quality should come from typography, composition, contrast, whitespace, purposeful color, and excellent interaction design.
+
+## Dark mode
+
+The current dark theme is too grey-heavy.
+
+I want a genuinely dark interface.
+
+Use near-black backgrounds for dark mode, with carefully controlled surface variations.
+
+Suggested direction:
+
+- Main background: near-black.
+- Secondary surfaces: subtly differentiated dark surfaces.
+- Borders: restrained, low-contrast dark borders.
+- Primary text: clean off-white.
+- Secondary text: appropriately muted.
+- Accent: a controlled GRIT identity color.
+- Success, warning, and error states: meaningful semantic colors.
+
+Do not make every component a different shade of grey.
+
+## Light mode
+
+Provide an equally polished light theme.
+
+Maintain consistent spacing, typography, borders, contrast, and interaction behavior across both themes.
+
+## Theme interaction
+
+Replace the current three-button Light / Dark / System selection interface.
+
+Required behavior:
+
+- First visit defaults to System.
+- Respect the operating system's color preference.
+- Provide a simple, intuitive theme toggle.
+- Allow users to switch between light and dark.
+- Persist an explicit user preference.
+- If the preference is System, continue respecting operating system changes.
+- Prevent theme flashing during initial page load.
+- Avoid hydration mismatch errors.
+
+A simple sun/moon toggle is preferable to the current segmented three-option selector.
+
+---
+
+# 4. PUBLIC HOMEPAGE — REDESIGN AS A REAL SAAS PRODUCT
+
+The current homepage displays internal certification lifecycle architecture.
+
+This is inappropriate for a public-facing product homepage.
+
+Students visiting the website should understand what GRIT does, why it matters, and how to get started.
+
+The homepage must become a proper, detailed, scrollable SaaS product landing page.
+
+## Required homepage sections
+
+### Section 1: Hero
+
+Communicate the platform's purpose clearly.
+
+Explain that GRIT provides a structured, verified interview-based skill assessment and certification experience.
+
+Include meaningful calls to action for students and interviewers.
+
+Avoid generic phrases such as "Unlock your potential" or "Revolutionize your future."
+
+### Section 2: How GRIT works
+
+Explain the actual platform workflow in accessible language:
+
+1. Preparation and eligibility.
+2. Interviewer discovery and booking.
+3. Live technical interview.
+4. Structured evaluation and feedback.
+5. Certification review and badge award.
+
+This must be understandable to a student without requiring knowledge of internal backend architecture.
+
+### Section 3: Student experience
+
+Explain:
+
+- Eligibility tracking.
+- Available interviewers.
+- Slot discovery.
+- Interview booking.
+- Interview history.
+- Evaluation feedback.
+- Retake eligibility.
+- Certification progress.
+
+### Section 4: Interviewer experience
+
+Explain:
+
+- Interviewer onboarding.
+- Availability management.
+- Interview scheduling.
+- Interview workspace.
+- Evaluation submission.
+- Structured feedback.
+
+### Section 5: Certification and outcomes
+
+Explain how an interview outcome progresses through certification review and badge issuance.
+
+Clearly distinguish an interview pass from an officially awarded certification.
+
+Do not promise automatic certification when operations approval is required.
+
+### Section 6: Trust and integrity
+
+Explain the platform's actual governance features:
+
+- Conflict-aware booking.
+- Structured evaluations.
+- Malpractice reporting.
+- Administrative review.
+- Auditable certification decisions.
+
+Do not make unsupported security or fairness claims.
+
+### Section 7: Final call to action
+
+Provide clear pathways for students and interviewers.
+
+## Homepage navigation
+
+Create a clean public navigation system.
+
+Suggested navigation:
+
+- GRIT logo.
+- How it works.
+- For Students.
+- For Interviewers.
+- About / Platform.
+- Login.
+- Get Started.
+
+Do not display Operations as a public navigation item.
+
+The homepage should be scrollable, section-based, informative, and visually memorable.
+
+It should feel like a polished SaaS product website rather than an internal dashboard.
+
+---
+
+# 5. OPERATIONS PORTAL MUST NOT BE PUBLICLY ADVERTISED
+
+Operations is an internal administrative workspace.
+
+There is no need to publicly advertise it.
+
+## Public interface
+
+Remove:
+
+- Operations portal cards.
+- Operations login buttons.
+- Operations signup options.
+- Public operations navigation links.
+- Any public role-selection interface that allows users to select Operations.
+
+The public homepage should focus on students and interviewers.
+
+## Private staff entry
+
+Introduce a dedicated, unadvertised staff entry route, such as:
+
+`/staff-access`
+
+The route must reuse the existing Supabase authentication system.
+
+Expected flow:
+
+1. Operations staff open the private staff entry route.
+2. They authenticate using their existing account.
+3. The server validates their actual assigned role.
+4. Authorized OPERATIONS users are redirected to `/operations`.
+5. Unauthorized users are redirected to their own portal or receive an appropriate access-denied response.
+
+Do not implement a second authentication system.
+
+Do not use a secret URL as a substitute for authorization.
+
+## Security requirements
+
+- No public Operations registration.
+- No client-controlled role assignment.
+- No role escalation through signup metadata.
+- Server-side authorization on every protected page and API endpoint.
+- Preserve existing RLS policies.
+- Preserve existing staff-only database access.
+- Consider MFA for privileged Operations accounts.
+- Maintain audit logging for sensitive administrative actions.
+
+Hiding the Operations entry point is a UX decision, not a security boundary.
+
+---
+
+# 6. AUTHENTICATION AND ROLE-AWARE NAVIGATION
+
+The existing login and logout experience is confusing.
+
+Improve the entire authentication experience.
+
+## Role-aware navigation
+
+Expected behavior:
+
+| User | Attempts to access | Expected behavior |
+|---|---|---|
+| Student | Student portal | Allow |
+| Student | Interviewer portal | Redirect to Student portal |
+| Student | Operations portal | Redirect to Student portal |
+| Interviewer | Interviewer portal | Allow |
+| Interviewer | Student portal | Redirect to Interviewer portal |
+| Interviewer | Operations portal | Redirect to Interviewer portal |
+| Operations | Operations portal | Allow |
+| Operations | Student portal | Apply the intended role-navigation policy |
+| Unauthenticated | Protected portal | Redirect to login |
+
+Preserve authorization checks on the backend.
+
+Frontend redirects must never replace server-side authorization.
+
+## Login behavior
+
+- If a user is already authenticated, opening `/login` should redirect them to their appropriate portal.
+- If an authenticated student opens an interviewer route, redirect them to `/student`.
+- If an authenticated interviewer opens an operations route, redirect them to `/interviewer`.
+- Preserve safe intended destinations for unauthenticated users.
+- Never allow open redirects.
+
+## Logout behavior
+
+- Implement a reliable Supabase sign-out flow.
+- Clear relevant client-side user state.
+- Prevent stale authenticated UI from remaining visible.
+- Redirect to the public homepage after logout.
+- Provide immediate visual feedback while logout is processing.
+- Handle logout failures properly.
+
+## Authenticated homepage identity
+
+If a logged-in user visits the homepage:
+
+Do not show an anonymous-looking public navigation with a random Sign out button.
+
+Show their authenticated identity and role.
+
+For example:
+
+- Student — Student Portal.
+- Interviewer — Interviewer Portal.
+- Operations — Staff Workspace, accessible only through the private staff experience.
+
+The user must always understand which account is currently active.
+
+Do not expose sensitive profile information.
+
+---
+
+# 7. SIGNUP EMAIL CONFIRMATION REDIRECT BUG
+
+Current issue:
+
+1. Student registers using a real email.
+2. Supabase sends the confirmation email.
+3. Clicking the confirmation link opens `localhost:3000`.
+4. The deployed website is hosted on Vercel.
+5. The confirmation flow therefore fails to navigate correctly.
+6. The student may subsequently be able to log in, but that does not prove the confirmation flow is correct.
+
+Investigate the entire process.
+
+Inspect:
+
+- Supabase Auth URL Configuration.
+- Site URL.
+- Allowed redirect URLs.
+- Signup API implementation.
+- Supabase `emailRedirectTo` configuration.
+- Confirmation callback route.
+- Token verification and session exchange.
+- Production environment variables.
+- Local development behavior.
+
+Expected production destination:
+
+`https://gritinterviewhub.vercel.app`
+
+Ensure production confirmation links use the deployed domain.
+
+Preserve localhost support for development.
+
+Do not hardcode the production URL in multiple locations.
+
+Use a centralized, validated application URL configuration.
+
+Verify:
+
+- Signup.
+- Confirmation email delivery.
+- Confirmation link opening.
+- Token verification.
+- Session establishment.
+- Redirect to the correct next page.
+- Invalid and expired confirmation tokens.
+- Already-confirmed accounts.
+
+---
+
+# 8. PROFESSIONAL EMAIL EXPERIENCE
+
+The current emails are too basic and lack context.
+
+Improve the email experience across the platform.
+
+## A. Student confirmation email
+
+Create a professionally branded GRIT email.
+
+It should explain:
+
+- Why the student received the email.
+- That they initiated a GRIT account registration.
+- What email confirmation means.
+- What happens after confirmation.
+- A clear confirmation action.
+- What to do if they did not initiate registration.
+
+The email must be visually polished and readable on mobile.
+
+Do not make it look like a generic raw Supabase authentication email.
+
+Investigate the existing Supabase email template and SMTP configuration.
+
+If the project uses Supabase-managed confirmation emails, implement the appropriate supported template and configuration changes rather than creating a disconnected duplicate email system.
+
+## B. Interviewer invitation email
+
+Current behavior:
+
+- Operations generates an interviewer invitation.
+- The application displays an invitation link.
+- Operations staff must manually copy and send it.
+- When the link is opened in another browser, it returns an error page.
+- Browser console shows a 404.
+
+This is an end-to-end workflow defect.
+
+The intended experience:
+
+1. Operations creates an interviewer invitation.
+2. The backend generates a secure invitation token.
+3. The invitation is stored using the existing secure token-storage approach.
+4. The system sends an actual email to the invited interviewer.
+5. The email explains who is inviting them, why they are invited, what access they receive, and what they need to do.
+6. The email includes a working acceptance link.
+7. The invitation acceptance page opens correctly in a fresh browser.
+8. The backend validates the token.
+9. The interviewer accepts the invitation.
+10. The existing onboarding and role provisioning logic completes securely.
+
+The email must contain:
+
+- GRIT branding.
+- Invitation context.
+- Inviting organization or authorized staff context where available.
+- Expiration information.
+- Clear acceptance action.
+- Instructions for expired or invalid invitations.
+
+## C. Invitation 404 investigation
+
+Do not simply hide the 404.
+
+Trace the complete path:
+
+- Invitation creation API.
+- Token generation.
+- Token hashing and persistence.
+- Email URL construction.
+- Environment-specific base URL.
+- Invitation acceptance route.
+- Token verification API.
+- Invitation expiration logic.
+- Acceptance API.
+- Database RPC.
+- Final redirect.
+
+Verify that the URL generated by the backend exactly matches an implemented frontend route.
+
+Check query parameter names and token encoding.
+
+Ensure invitation links work when opened:
+
+- In a different browser.
+- In an incognito window.
+- Without an existing authenticated session.
+- On the deployed production domain.
+
+Preserve single-use token semantics, expiration, and secure token handling.
+
+Do not expose stored token hashes or sensitive invitation information.
+
+## D. Email provider
+
+First inspect the current email infrastructure.
+
+If a transactional email provider already exists, reuse it.
+
+If no provider exists, identify the minimum integration required and document the necessary environment variables and setup.
+
+Do not pretend that an email has been sent if the provider is not configured.
+
+Implement reliable delivery/error handling and prevent duplicate invitation emails where possible.
+
+---
+
+# 9. PERFORMANCE — ELIMINATE THE 5-SECOND FEELING
+
+Current issues:
+
+- Login takes approximately five seconds.
+- Dashboard loading takes approximately five seconds.
+- Switching tabs and returning to the website triggers another slow loading sequence.
+- Skeleton UI appears repeatedly.
+- Buttons sometimes trigger background work without visible immediate feedback.
+- The interface feels unresponsive.
+
+Do not randomly add caching or loading animations.
+
+First identify the actual causes.
+
+## Investigate
+
+- Supabase session restoration.
+- Auth state listeners.
+- Repeated profile fetching.
+- Duplicate API requests.
+- Sequential API calls that could safely run in parallel.
+- Server component and client component boundaries.
+- Middleware execution.
+- Route-level loading behavior.
+- Vercel serverless cold starts.
+- Database query latency.
+- Dashboard aggregation queries.
+- Browser tab visibility events.
+- Unnecessary focus-based refetching.
+- Cache invalidation.
+- Client-side state preservation.
+
+Use Chrome DevTools Network timings and application logs where available.
+
+## Expected UX behavior
+
+### Login
+
+- Show immediate feedback when the login button is clicked.
+- Disable repeated submissions.
+- Display a clear loading state.
+- Preserve form input when appropriate.
+- Navigate as soon as authentication and role resolution complete.
+- Avoid unnecessary sequential requests.
+
+### Dashboard
+
+- Render the application shell immediately when possible.
+- Load independent dashboard sections independently.
+- Do not block the entire dashboard waiting for one slow widget.
+- Preserve already loaded data while refreshing.
+- Use stale-while-revalidate only where safe.
+- Avoid refetching everything merely because the browser tab becomes active.
+
+### Tab switching
+
+When a user returns to an already-open tab:
+
+- Preserve the existing UI.
+- Avoid unnecessary full-screen skeleton loading.
+- Refresh data only when required by the application's consistency requirements.
+- Use appropriate focus and visibility handling.
+
+### Caching and security
+
+Be extremely careful with authenticated data.
+
+- Never leak one user's data into another user's session.
+- Do not cache role-sensitive API responses publicly.
+- Correctly scope client caches to the authenticated user.
+- Invalidate sensitive data on logout and account changes.
+- Preserve server-side authorization.
+
+Measure improvements instead of claiming performance improvements without evidence.
+
+---
+
+# 10. BUTTON INTERACTIONS AND LOADING FEEDBACK
+
+The current application often performs work in the background without visibly responding.
+
+This makes the interface feel broken.
+
+Every interactive element must communicate its state.
+
+## Required interaction states
+
+For buttons:
+
+- Default.
+- Hover.
+- Active/pressed.
+- Focus-visible.
+- Loading.
+- Disabled.
+- Success or error feedback where relevant.
+
+For navigation:
+
+- Immediate visual response.
+- Correct pointer cursor.
+- Active navigation state.
+- Route-level loading feedback.
+- No unnecessary blank screen.
+
+For forms:
+
+- Submission state.
+- Validation feedback.
+- Server error feedback.
+- Success confirmation.
+- Prevention of duplicate submissions.
+
+For asynchronous actions:
+
+- Immediate acknowledgement.
+- Meaningful progress indicator.
+- Clear completion or failure feedback.
+
+Use appropriate loading indicators:
+
+- Inline spinners for actions.
+- Skeletons for initial content loading.
+- Progress indicators for longer workflows.
+- Subtle refresh indicators when existing data is already visible.
+
+Do not show skeletons on every background refresh.
+
+Do not add animations just for decoration.
+
+## Pointer and interaction consistency
+
+The cursor must indicate clickable controls.
+
+Ensure:
+
+- Buttons use pointer cursors.
+- Clickable links use pointer cursors.
+- Disabled controls use appropriate disabled styling.
+- Hover states are visible but restrained.
+- Keyboard navigation works.
+- Focus states are accessible.
+
+Use consistent interaction behavior across the entire application.
+
+---
+
+# 11. EXISTING DASHBOARD AND PORTAL REDESIGN
+
+Redesign all three role experiences without removing functionality.
+
+## Student portal
+
+Prioritize:
+
+- Eligibility and badge progression.
+- Interview readiness.
+- Interviewer discovery.
+- Available interview slots.
+- Booking and upcoming interviews.
+- Interview history.
+- Evaluation feedback.
+- Retake eligibility.
+- Certification status.
+
+Present information in a clear hierarchy.
+
+The student should immediately understand:
+
+1. Where they currently stand.
+2. What action they should take next.
+3. What their previous interview outcomes were.
+4. What is required for certification.
+
+## Interviewer portal
+
+Prioritize:
+
+- Interviewer profile.
+- Availability management.
+- Upcoming interviews.
+- Interview workspace.
+- Student and badge context.
+- Evaluation submission.
+- Attendance recording.
+- Completed interviews.
+
+Ensure the interviewer can quickly identify pending work.
+
+## Operations portal
+
+Prioritize:
+
+- Platform overview.
+- Interview scheduling and monitoring.
+- Student and interviewer management.
+- Interviewer invitations.
+- Certification approvals.
+- Malpractice review.
+- Audit history.
+- Administrative actions.
+
+Operations should feel like a serious internal governance tool.
+
+Do not expose it through public navigation.
+
+All existing workflows must remain available to authorized staff.
+
+---
+
+# 12. RESPONSIVE DESIGN AND ACCESSIBILITY
+
+Test the complete experience on:
+
+- Desktop.
+- Tablet.
+- Mobile.
+
+Ensure:
+
+- Navigation adapts appropriately.
+- Tables remain usable on smaller screens.
+- Forms are mobile-friendly.
+- Buttons have sufficient touch targets.
+- Dialogs fit within the viewport.
+- No horizontal overflow.
+- Text contrast is sufficient.
+- Keyboard navigation works.
+- Focus indicators remain visible.
+- Loading and error states are accessible.
+- Reduced-motion preferences are respected.
+
+Do not treat responsive design as simply shrinking desktop components.
+
+---
+
+# 13. IMPLEMENTATION STRATEGY
+
+Work in controlled phases.
+
+Do not implement everything through one massive visual rewrite.
+
+## Phase 1 — Repository audit
+
+Inspect the existing application.
+
+Identify:
+
+- Current routing architecture.
+- Authentication architecture.
+- Existing design system.
+- Existing theme implementation.
+- Email infrastructure.
+- Invitation workflow.
+- Loading and data-fetching patterns.
+- Existing portal layouts.
+- Existing backend contracts.
+
+Produce a concise implementation map identifying the files that need changes.
+
+Do not start rewriting components before understanding their dependencies.
+
+## Phase 2 — Fix critical functional defects
+
+Prioritize:
+
+1. Signup confirmation redirect.
+2. Interviewer invitation email delivery.
+3. Invitation acceptance 404.
+4. Login and logout navigation.
+5. Role-aware portal redirects.
+6. Button feedback and loading behavior.
+
+These defects must be fixed before spending time on purely decorative redesign.
+
+## Phase 3 — Public homepage and access architecture
+
+Implement:
+
+- New public SaaS homepage.
+- Separate public and authenticated navigation.
+- Removal of public Operations entry points.
+- Private staff access route.
+- Authenticated user identity display.
+- Clean Login / Signup / Portal navigation.
+
+## Phase 4 — Design system and theme
+
+Implement a coherent design system:
+
+- Colors.
+- Typography.
+- Spacing.
+- Surface hierarchy.
+- Borders.
+- Buttons.
+- Inputs.
+- Navigation.
+- Dialogs.
+- Toasts.
+- Loading states.
+- Light and dark themes.
+
+Make the dark theme near-black.
+
+Remove the grid background and other generic AI design decorations.
+
+## Phase 5 — Portal redesign
+
+Apply the design system to:
+
+- Student.
+- Interviewer.
+- Operations.
+
+Preserve the underlying business workflows and API integrations.
+
+## Phase 6 — Performance optimization
+
+Measure and improve:
+
+- Login.
+- Session restoration.
+- Dashboard loading.
+- Browser tab switching.
+- API request duplication.
+- Initial route rendering.
+
+Do not optimize by introducing insecure shared caching or removing necessary validation.
+
+## Phase 7 — Testing and verification
+
+Run the existing project checks.
+
+At minimum:
+
+- TypeScript typecheck.
+- ESLint.
+- Existing Vitest suites.
+- Production build.
+- Relevant frontend tests.
+- API tests where available.
+- Browser tests.
+- Mobile responsiveness tests.
+
+Test both authenticated and unauthenticated journeys.
+
+Verify every role independently.
+
+---
+
+# 14. ACCEPTANCE CRITERIA
+
+The work is not complete until the following can be demonstrated.
+
+### Public homepage
+
+- [ ] Professional, scrollable SaaS homepage.
+- [ ] Clear product explanation.
+- [ ] No internal certification architecture diagram.
+- [ ] No public Operations entry point.
+- [ ] Clear student and interviewer pathways.
+- [ ] Correct authenticated identity display.
+
+### Authentication
+
+- [ ] Student signup works.
+- [ ] Confirmation email redirects to the deployed domain.
+- [ ] Login works.
+- [ ] Logout works.
+- [ ] Existing sessions are restored correctly.
+- [ ] Authenticated users are redirected to their correct portals.
+- [ ] Unauthorized role access is handled correctly.
+- [ ] No role escalation is possible.
+
+### Operations access
+
+- [ ] Private staff access route works.
+- [ ] Authorized Operations users can access the dashboard.
+- [ ] Students cannot access Operations.
+- [ ] Interviewers cannot access Operations.
+- [ ] Backend authorization remains enforced.
+
+### Interviewer invitations
+
+- [ ] Invitation generation works.
+- [ ] Invitation email is actually sent when configured.
+- [ ] Email contains proper context.
+- [ ] Acceptance URL uses the correct production domain.
+- [ ] Link works in a separate browser.
+- [ ] Invalid and expired invitations are handled.
+- [ ] Single-use token behavior is preserved.
+
+### UX
+
+- [ ] Buttons visibly respond immediately.
+- [ ] Pointer cursors are correct.
+- [ ] Loading states are consistent.
+- [ ] Forms provide meaningful feedback.
+- [ ] Navigation feels immediate.
+- [ ] No unnecessary skeleton reloads when switching tabs.
+
+### Design
+
+- [ ] Distinctive premium GRIT visual identity.
+- [ ] Near-black dark mode.
+- [ ] Polished light mode.
+- [ ] System theme as the initial default.
+- [ ] Simple theme toggle.
+- [ ] No grid background.
+- [ ] No generic AI design patterns.
+- [ ] Responsive layouts.
+
+### Performance
+
+- [ ] Login timings measured.
+- [ ] Dashboard timings measured.
+- [ ] Duplicate requests investigated.
+- [ ] Tab switching tested.
+- [ ] No authenticated data leakage through caching.
+
+### Regression safety
+
+- [ ] Existing booking flow works.
+- [ ] Interviewer availability works.
+- [ ] Interview lifecycle works.
+- [ ] Evaluation and retake workflows work.
+- [ ] Certification approval works.
+- [ ] Malpractice workflows work.
+- [ ] Audit logging remains intact.
+
+---
+
+# 15. FINAL INSTRUCTIONS
+
+I care about the quality of the finished product, not the number of files modified.
+
+Do not:
+
+- Replace the entire application with a new template.
+- Rewrite working business logic for visual convenience.
+- Remove existing functionality to simplify the redesign.
+- Add fake content to make the dashboard look populated.
+- Create buttons that do nothing.
+- Introduce an unnecessary UI framework.
+- Break existing database contracts.
+- Weaken security to make navigation easier.
+- Claim email delivery works without verifying actual delivery.
+- Claim invitation acceptance works without testing it.
+- Claim performance is fixed without measuring it.
+
+Use the existing components and architecture wherever appropriate.
+
+If a backend change is necessary, explain why and implement it consistently with the existing security model.
+
+If external configuration is required, such as Supabase email templates, SMTP, or a transactional email provider, clearly identify the configuration that must be performed outside the repository.
+
+After implementation, provide:
+
+1. Summary of changes.
+2. Files modified and their purpose.
+3. Backend changes, if any.
+4. Database migrations, if any, and why they were necessary.
+5. Environment variables or external configuration required.
+6. Tests executed and actual results.
+7. Remaining issues or limitations.
+8. Manual verification steps for production.
+
+**The final result should feel like a thoughtfully engineered, premium assessment and certification platform — not an AI-generated dashboard.**
+
+Preserve the existing GRIT identity, make the product genuinely intuitive, and prioritize reliability over visual theatrics.

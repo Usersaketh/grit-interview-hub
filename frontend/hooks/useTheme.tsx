@@ -12,12 +12,13 @@ export type ThemeMode = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
 
 const STORAGE_KEY = "grit-theme";
-const DEFAULT_THEME_MODE: ThemeMode = "dark";
+const DEFAULT_THEME_MODE: ThemeMode = "system";
 
 interface ThemeContextValue {
   mode: ThemeMode;
   resolvedTheme: ResolvedTheme;
   setMode: (mode: ThemeMode) => void;
+  toggleTheme: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -65,11 +66,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const onSystemChange = () => {
       try {
         const current = window.localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-        if (current === "system") {
+        if (!current || current === "system") {
           setResolvedTheme(applyThemeToDocument("system"));
         }
       } catch {
-        // Keep current resolved theme
+        setResolvedTheme(applyThemeToDocument("system"));
       }
     };
     media.addEventListener("change", onSystemChange);
@@ -86,8 +87,16 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const toggleTheme = useCallback(() => {
+    const currentlyDark =
+      typeof document !== "undefined"
+        ? document.documentElement.classList.contains("dark")
+        : resolvedTheme === "dark";
+    setMode(currentlyDark ? "light" : "dark");
+  }, [resolvedTheme, setMode]);
+
   return (
-    <ThemeContext.Provider value={{ mode, resolvedTheme, setMode }}>
+    <ThemeContext.Provider value={{ mode, resolvedTheme, setMode, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );

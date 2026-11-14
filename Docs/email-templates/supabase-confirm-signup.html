@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Confirm your GRIT Interview Hub account</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#050506;color:#f4f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#050506;padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background-color:#0b0b0e;border:1px solid #222229;border-radius:10px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px 28px;border-bottom:1px solid #1d1d24;">
+                <span style="display:inline-block;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9fb0ff;">GRIT INTERVIEW HUB</span>
+                <h1 style="margin:10px 0 0 0;font-size:21px;line-height:1.3;font-weight:600;color:#f4f4f6;">
+                  Verify your email address
+                </h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px;font-size:14px;line-height:1.6;color:#c9cad1;">
+                <p style="margin:0 0 14px 0;">Welcome to GRIT Interview Hub.</p>
+                <p style="margin:0 0 22px 0;">
+                  Confirm your email address to activate your Student Portal, review badge skill clearances, and schedule your live technical interviews.
+                </p>
+
+                <table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 22px 0;">
+                  <tr>
+                    <td style="border-radius:6px;background-color:#4f65f1;">
+                      <a href="{{ .ConfirmationURL }}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 20px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">
+                        Verify Email &amp; Continue
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+
+                <p style="margin:0 0 8px 0;font-size:12px;color:#8c8d98;">
+                  If the button above does not work, copy and paste this confirmation link into your browser:
+                </p>
+                <p style="margin:0 0 18px 0;word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:#9fb0ff;">
+                  {{ .ConfirmationURL }}
+                </p>
+
+                <p style="margin:0;padding-top:16px;border-top:1px solid #1d1d24;font-size:12px;color:#8c8d98;">
+                  If your verification link expires, return to GRIT Interview Hub and request a fresh link from the sign-in or verification screen. If you did not create this account, you can safely ignore this email.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

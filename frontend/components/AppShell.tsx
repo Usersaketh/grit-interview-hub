@@ -11,6 +11,7 @@ import {
   FileText,
   History,
   LayoutDashboard,
+  Loader2,
   LogOut,
   Mail,
   Menu,
@@ -158,6 +159,13 @@ export function AppShell({
         tone: "info",
       });
       router.replace("/");
+    } catch (err) {
+      pushToast({
+        title: "Sign out failed",
+        description:
+          err instanceof Error ? err.message : "Could not sign out right now.",
+        tone: "error",
+      });
     } finally {
       setSigningOut(false);
     }
@@ -225,11 +233,8 @@ export function AppShell({
             <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--accent-primary)]">
               <Terminal className="h-3.5 w-3.5" aria-hidden="true" />
             </span>
-            <span>GRIT Hub</span>
+            <span>GRIT Interview Hub</span>
           </Link>
-          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-            v2
-          </span>
         </div>
 
         <nav
@@ -351,7 +356,11 @@ export function AppShell({
                 disabled={signingOut}
                 className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)]"
               >
-                <LogOut className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                {signingOut ? (
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                ) : (
+                  <LogOut className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                )}
                 <span>{signingOut ? "Signing out..." : "Sign out"}</span>
               </button>
             ) : (
@@ -401,7 +410,7 @@ export function AppShell({
             </div>
           ) : (
             <motion.div
-              initial={{ opacity: 0, y: 4 }}
+              initial={false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.16, ease: "easeOut" }}
             >

@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  Loader2,
   MailCheck,
   Terminal,
 } from "lucide-react";
@@ -130,13 +131,8 @@ export function AcceptInvitationView() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)]">
-      <div
-        aria-hidden="true"
-        className="grit-grid-bg pointer-events-none absolute inset-x-0 top-0 h-[420px] opacity-30 [mask-image:linear-gradient(to_bottom,black,transparent)]"
-      />
-
-      <header className="relative z-10 flex h-14 items-center justify-between gap-4 border-b border-[var(--border-hairline)] bg-[var(--bg-glass)] px-4 backdrop-blur-md sm:px-8">
+    <div className="flex min-h-screen flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)]">
+      <header className="flex h-14 items-center justify-between gap-4 border-b border-[var(--border-hairline)] bg-[var(--bg-glass)] px-4 backdrop-blur-md sm:px-8">
         <Link
           href="/"
           className="flex items-center gap-2.5 whitespace-nowrap text-sm font-semibold tracking-tight text-[var(--text-primary)]"
@@ -149,15 +145,15 @@ export function AcceptInvitationView() {
         <ThemeSwitch />
       </header>
 
-      <main className="relative z-10 flex flex-1 items-center justify-center px-4 py-10">
+      <main className="flex flex-1 items-center justify-center px-4 py-10">
         <div className="w-full max-w-lg rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6 shadow-[var(--shadow-elevated)] sm:p-8">
           <div className="mb-6 flex items-center gap-3">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--accent-primary)]">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] text-[var(--accent-primary)]">
               <MailCheck className="h-4 w-4" aria-hidden="true" />
             </span>
             <div>
               <p className="font-mono text-[11px] font-medium uppercase tracking-wider text-[var(--accent-text)]">
-                Invitation-Only Assessor Onboarding
+                Interviewer Onboarding
               </p>
               <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">
                 Accept Interviewer Invitation
@@ -166,9 +162,10 @@ export function AcceptInvitationView() {
           </div>
 
           {verifying ? (
-            <p className="text-sm text-[var(--text-secondary)]">
-              Verifying invitation token...
-            </p>
+            <div className="flex items-center gap-2.5 py-4 text-sm text-[var(--text-secondary)]">
+              <Loader2 className="h-4 w-4 animate-spin text-[var(--accent-primary)]" aria-hidden="true" />
+              <span>Verifying invitation token...</span>
+            </div>
           ) : verifyError || !inviteInfo ? (
             <div className="space-y-4">
               <div
@@ -176,14 +173,28 @@ export function AcceptInvitationView() {
                 className="flex items-start gap-2.5 rounded-md border border-[var(--status-error)]/30 bg-[var(--status-error-bg)] p-4 text-sm text-[var(--status-error)]"
               >
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>{verifyError ?? "Invalid invitation link."}</span>
+                <div className="space-y-1">
+                  <p className="font-medium">{verifyError ?? "Invalid invitation link."}</p>
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Invitation links are single-use and expire automatically. If you already activated your interviewer account, sign in below. Otherwise, ask your GRIT coordinator to issue a new invitation.
+                  </p>
+                </div>
               </div>
-              <Link
-                href="/"
-                className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md border border-[var(--border-hairline)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
-              >
-                Return Home
-              </Link>
+              <div className="flex flex-wrap gap-2.5">
+                <Link
+                  href="/login"
+                  className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)]"
+                >
+                  <span>Sign in</span>
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+                <Link
+                  href="/"
+                  className="inline-flex min-h-10 items-center whitespace-nowrap rounded-md border border-[var(--border-hairline)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
+                >
+                  Return Home
+                </Link>
+              </div>
             </div>
           ) : accepted ? (
             <div className="space-y-4">
@@ -248,17 +259,36 @@ export function AcceptInvitationView() {
                       {formatTimestamp(inviteInfo.expiresAt)}
                     </dd>
                   </div>
+                  {inviteInfo.expertiseTags.length > 0 ? (
+                    <div className="sm:col-span-2">
+                      <dt className="text-[var(--text-muted)]">Assessment Focus</dt>
+                      <dd className="mt-0.5 font-medium text-[var(--text-primary)]">
+                        {inviteInfo.expertiseTags.join(" · ")}
+                      </dd>
+                    </div>
+                  ) : null}
                 </dl>
               </div>
 
               {inviteInfo.status !== "PENDING" ? (
                 <div
                   role="alert"
-                  className="rounded-md border border-[var(--status-warning)]/30 bg-[var(--status-warning-bg)] p-4 text-xs text-[var(--text-primary)]"
+                  className="space-y-3 rounded-md border border-[var(--status-warning)]/30 bg-[var(--status-warning-bg)] p-4 text-xs text-[var(--text-primary)]"
                 >
-                  This invitation is currently <strong>{inviteInfo.status}</strong>{" "}
-                  and can no longer be redeemed. Request a new invitation from an
-                  Operations coordinator if needed.
+                  <p>
+                    This invitation is currently <strong>{inviteInfo.status}</strong>{" "}
+                    and can no longer be redeemed. Request a new invitation from an
+                    Operations coordinator if needed.
+                  </p>
+                  {inviteInfo.status === "ACCEPTED" ? (
+                    <Link
+                      href="/login"
+                      className="inline-flex items-center gap-1.5 font-semibold text-[var(--accent-text)] hover:underline"
+                    >
+                      <span>Sign in to Interviewer Portal</span>
+                      <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                    </Link>
+                  ) : null}
                 </div>
               ) : profile && !emailMatchesSignedIn ? (
                 <div
@@ -377,12 +407,16 @@ export function AcceptInvitationView() {
                     disabled={submitting}
                     className="inline-flex min-h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-primary-hover)] disabled:opacity-55"
                   >
+                    {submitting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                    )}
                     <span>
                       {submitting
                         ? "Activating interviewer access..."
                         : "Accept Invitation & Continue"}
                     </span>
-                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </form>
               )}

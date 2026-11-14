@@ -318,10 +318,19 @@ export interface CreateInvitationPayload {
   idempotencyKey: string;
 }
 
+export interface EmailDeliveryStatus {
+  status: "sent" | "not_configured" | "failed";
+  provider: "resend" | "none";
+  recipient: string;
+  messageId?: string;
+  error?: string;
+}
+
 export interface CreateInvitationResponse {
   invitation: InterviewerInvitationRecord;
-  inviteUrl: string;
+  inviteUrl: string | null;
   tokenIssued: boolean;
+  emailDelivery?: EmailDeliveryStatus | null;
 }
 
 export interface InvitationVerifyInfo {

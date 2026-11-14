@@ -39,24 +39,24 @@
   }
 
   .dark {
-    /* Dark Surface System (Vercel obsidian precision + Raycast layered contrast) */
-    --bg-canvas: #090a0e;
-    --bg-surface: #101218;
-    --bg-elevated: #171a23;
-    --bg-subtle: #1e222e;
-    --bg-glass: rgba(16, 18, 24, 0.82);
+    /* Dark Surface System (Near-black precision + subtle elevated surfaces) */
+    --bg-canvas: #050506;
+    --bg-surface: #0b0b0e;
+    --bg-elevated: #121216;
+    --bg-subtle: #18181e;
+    --bg-glass: rgba(5, 5, 6, 0.86);
 
-    --text-primary: #f3f5f9;
-    --text-secondary: #9aa3b5;
-    --text-muted: #687185;
+    --text-primary: #f4f4f6;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
 
-    --border-hairline: rgba(255, 255, 255, 0.085);
+    --border-hairline: rgba(255, 255, 255, 0.08);
     --border-strong: rgba(255, 255, 255, 0.16);
 
-    --accent-primary: #5e72eb;
-    --accent-primary-hover: #7385f5;
-    --accent-soft: rgba(94, 114, 235, 0.14);
-    --accent-text: #a5b4ff;
+    --accent-primary: #4f65f1;
+    --accent-primary-hover: #6377f7;
+    --accent-soft: rgba(79, 101, 241, 0.14);
+    --accent-text: #9fb0ff;
     --accent-warm: #ff6363;
 
     --status-success: #34d399;
@@ -68,7 +68,7 @@
     --status-info: #60a5fa;
     --status-info-bg: rgba(96, 165, 250, 0.1);
 
-    --shadow-elevated: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+    --shadow-elevated: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 32px -12px rgba(0, 0, 0, 0.72);
   }
 
   html {
@@ -77,12 +77,27 @@
     font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
   }
 
   body {
     background-color: var(--bg-canvas);
     color: var(--text-primary);
     min-height: 100vh;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  select:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"],
+  select:disabled {
+    cursor: not-allowed;
   }
 
   h1,
@@ -98,21 +113,6 @@
   .font-mono {
     font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
-}
-
-.grit-grid-bg {
-  background-image:
-    linear-gradient(to right, var(--border-hairline) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--border-hairline) 1px, transparent 1px);
-  background-size: 48px 48px;
-}
-
-.grit-spotlight {
-  background: radial-gradient(
-    640px circle at 50% 0%,
-    var(--accent-soft),
-    transparent 70%
-  );
 }
 
 @media (prefers-reduced-motion: reduce) {

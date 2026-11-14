@@ -1,5 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { AppError } from "@backend/lib/errors";
+import {
+  sendInterviewerInvitationEmail,
+  type EmailDeliveryResult,
+} from "@backend/lib/email/mailer";
 
 export type CreateInvitationInput = {
   email: string;
@@ -9,6 +13,11 @@ export type CreateInvitationInput = {
   expertiseTags: string[];
   expiresInDays: number;
   idempotencyKey: string;
+};
+
+export type CreateInvitationOptions = {
+  inviterName?: string | null;
+  sendEmail?: typeof sendInterviewerInvitationEmail;
 };
 
 export type RevokeInvitationInput = {
@@ -90,14 +99,16 @@ export function mapInvitationRpcError(error: { code?: string; message?: string }
 export async function createInterviewerInvitation(
   db: any,
   input: CreateInvitationInput,
-  originUrl?: string
+  originUrl?: string,
+  options: CreateInvitationOptions = {}
 ) {
   const rawToken = generateInvitationToken();
   const tokenHash = hashInvitationToken(rawToken);
   const expiresAt = new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+  const normalizedEmail = input.email.trim().toLowerCase();
 
   const { data, error } = await db.rpc("create_interviewer_invitation", {
-    p_email: input.email.trim().toLowerCase(),
+    p_email: normalizedEmail,
     p_full_name: input.fullName?.trim() ?? null,
     p_default_timezone: input.defaultTimezone.trim(),
     p_title: input.title?.trim() ?? null,
@@ -111,13 +122,38 @@ export async function createInterviewerInvitation(
     throw mapInvitationRpcError(error);
   }
 
+  // On an idempotency replay, Postgres returns the existing invitation row whose token_hash
+  // corresponds to the original call rather than the freshly generated tokenHash.
+  const isFreshCreation =
+    !data?.token_hash || data.token_hash === tokenHash;
+
   const acceptPath = `/invitations/accept?token=${encodeURIComponent(rawToken)}`;
-  const inviteUrl = originUrl ? `${originUrl.replace(/\/$/, "")}${acceptPath}` : acceptPath;
+  const inviteUrl = isFreshCreation
+    ? originUrl
+      ? `${originUrl.replace(/\/$/, "")}${acceptPath}`
+      : acceptPath
+    : null;
+
+  let emailDelivery: EmailDeliveryResult | null = null;
+  if (isFreshCreation && inviteUrl) {
+    const sendFn = options.sendEmail ?? sendInterviewerInvitationEmail;
+    emailDelivery = await sendFn({
+      recipientEmail: normalizedEmail,
+      recipientName: input.fullName?.trim() ?? data?.full_name ?? null,
+      inviterName: options.inviterName ?? null,
+      title: input.title?.trim() ?? data?.title ?? null,
+      defaultTimezone: input.defaultTimezone.trim(),
+      expertiseTags: input.expertiseTags,
+      expiresAt: data?.expires_at ?? expiresAt,
+      inviteUrl,
+    });
+  }
 
   return {
     invitation: data,
     inviteUrl,
-    tokenIssued: true,
+    tokenIssued: isFreshCreation,
+    emailDelivery,
   };
 }
 

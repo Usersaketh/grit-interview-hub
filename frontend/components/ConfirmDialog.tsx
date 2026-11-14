@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { motion } from "motion/react";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -102,13 +102,16 @@ export function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className={`inline-flex min-h-10 items-center justify-center whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] ${
+            className={`inline-flex min-h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] ${
               destructive
                 ? "bg-[var(--status-error)] hover:opacity-90"
                 : "bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)]"
             }`}
           >
-            {busy ? "Processing..." : confirmLabel}
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : null}
+            <span>{busy ? "Processing..." : confirmLabel}</span>
           </button>
         </div>
       </motion.div>
